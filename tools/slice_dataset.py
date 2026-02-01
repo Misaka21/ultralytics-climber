@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Image Slicing Tool for Large Image Datasets
-将大尺寸图像切片为小块，用于训练小目标检测模型
+将大尺寸图像切片为小块，用于训练小目标检测模型.
 
 Usage:
     # 命令行模式
@@ -14,20 +14,21 @@ Author: Claude Code
 """
 
 import argparse
-import cv2
+import json
 import os
 import sys
-from pathlib import Path
-from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import json
+from pathlib import Path
+
+import cv2
+from tqdm import tqdm
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description='将大尺寸图像切片为小块，保持目标原始像素尺寸',
+        description="将大尺寸图像切片为小块，保持目标原始像素尺寸",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='''
+        epilog="""
 示例:
   # 基本用法
   python slice_dataset.py --images ./images --labels ./labels --output ./sliced
@@ -38,35 +39,27 @@ def parse_args():
 
   # 处理多个文件夹
   python slice_dataset.py --images ./img1 ./img2 --labels ./lab1 ./lab2 --output ./sliced
-        '''
+        """,
     )
 
-    parser.add_argument('--images', '-i', nargs='+', type=str,
-                        help='图像文件夹路径 (可指定多个)')
-    parser.add_argument('--labels', '-l', nargs='+', type=str,
-                        help='标签文件夹路径 (可指定多个，与images一一对应)')
-    parser.add_argument('--output', '-o', type=str,
-                        help='输出文件夹路径')
-    parser.add_argument('--tile-size', '-t', type=int, default=640,
-                        help='切片大小 (默认: 640)')
-    parser.add_argument('--overlap', '-p', type=int, default=128,
-                        help='切片重叠像素 (默认: 128)')
-    parser.add_argument('--min-bbox-ratio', '-m', type=float, default=0.3,
-                        help='bbox最小可见比例，低于此值丢弃 (默认: 0.3)')
-    parser.add_argument('--keep-empty', '-k', action='store_true',
-                        help='保留没有目标的切片 (默认: 不保留)')
-    parser.add_argument('--workers', '-w', type=int, default=8,
-                        help='并行处理线程数 (默认: 8)')
-    parser.add_argument('--ext', '-e', type=str, default='jpg',
-                        help='图像文件扩展名 (默认: jpg)')
-    parser.add_argument('--interactive', action='store_true',
-                        help='强制进入交互模式')
+    parser.add_argument("--images", "-i", nargs="+", type=str, help="图像文件夹路径 (可指定多个)")
+    parser.add_argument("--labels", "-l", nargs="+", type=str, help="标签文件夹路径 (可指定多个，与images一一对应)")
+    parser.add_argument("--output", "-o", type=str, help="输出文件夹路径")
+    parser.add_argument("--tile-size", "-t", type=int, default=640, help="切片大小 (默认: 640)")
+    parser.add_argument("--overlap", "-p", type=int, default=128, help="切片重叠像素 (默认: 128)")
+    parser.add_argument(
+        "--min-bbox-ratio", "-m", type=float, default=0.3, help="bbox最小可见比例，低于此值丢弃 (默认: 0.3)"
+    )
+    parser.add_argument("--keep-empty", "-k", action="store_true", help="保留没有目标的切片 (默认: 不保留)")
+    parser.add_argument("--workers", "-w", type=int, default=8, help="并行处理线程数 (默认: 8)")
+    parser.add_argument("--ext", "-e", type=str, default="jpg", help="图像文件扩展名 (默认: jpg)")
+    parser.add_argument("--interactive", action="store_true", help="强制进入交互模式")
 
     return parser.parse_args()
 
 
 def interactive_mode():
-    """交互模式：通过用户输入获取参数"""
+    """交互模式：通过用户输入获取参数."""
     print("\n" + "=" * 60)
     print("  图像切片工具 - 交互模式")
     print("=" * 60)
@@ -80,10 +73,10 @@ def interactive_mode():
     while True:
         images_input = input("  >>> ").strip()
         if images_input:
-            config['images'] = [p.strip() for p in images_input.split(',')]
+            config["images"] = [p.strip() for p in images_input.split(",")]
             # 验证路径
             valid = True
-            for p in config['images']:
+            for p in config["images"]:
                 if not os.path.isdir(p):
                     print(f"  [错误] 路径不存在: {p}")
                     valid = False
@@ -98,16 +91,18 @@ def interactive_mode():
     print("  提示: 如果标签和图像在同一文件夹，输入 'same'")
     while True:
         labels_input = input("  >>> ").strip()
-        if labels_input.lower() == 'same':
-            config['labels'] = config['images']
+        if labels_input.lower() == "same":
+            config["labels"] = config["images"]
             break
         elif labels_input:
-            config['labels'] = [p.strip() for p in labels_input.split(',')]
-            if len(config['labels']) != len(config['images']):
-                print(f"  [错误] 标签文件夹数量({len(config['labels'])})与图像文件夹数量({len(config['images'])})不匹配")
+            config["labels"] = [p.strip() for p in labels_input.split(",")]
+            if len(config["labels"]) != len(config["images"]):
+                print(
+                    f"  [错误] 标签文件夹数量({len(config['labels'])})与图像文件夹数量({len(config['images'])})不匹配"
+                )
                 continue
             valid = True
-            for p in config['labels']:
+            for p in config["labels"]:
                 if not os.path.isdir(p):
                     print(f"  [错误] 路径不存在: {p}")
                     valid = False
@@ -122,7 +117,7 @@ def interactive_mode():
     while True:
         output_input = input("  >>> ").strip()
         if output_input:
-            config['output'] = output_input
+            config["output"] = output_input
             break
         else:
             print("  [错误] 请输入输出路径")
@@ -131,25 +126,25 @@ def interactive_mode():
     print("\n[4/7] 切片大小 (像素)")
     print("  提示: 推荐 640 或 1280，直接回车使用默认值 640")
     tile_input = input("  >>> ").strip()
-    config['tile_size'] = int(tile_input) if tile_input else 640
+    config["tile_size"] = int(tile_input) if tile_input else 640
 
     # 重叠大小
     print("\n[5/7] 切片重叠 (像素)")
     print("  提示: 推荐为切片大小的 10-30%，直接回车使用默认值 128")
     overlap_input = input("  >>> ").strip()
-    config['overlap'] = int(overlap_input) if overlap_input else 128
+    config["overlap"] = int(overlap_input) if overlap_input else 128
 
     # 最小bbox比例
     print("\n[6/7] 最小bbox可见比例")
     print("  提示: 被切边的bbox保留多少比例，推荐 0.3，直接回车使用默认值")
     min_ratio_input = input("  >>> ").strip()
-    config['min_bbox_ratio'] = float(min_ratio_input) if min_ratio_input else 0.3
+    config["min_bbox_ratio"] = float(min_ratio_input) if min_ratio_input else 0.3
 
     # 是否保留空切片
     print("\n[7/7] 是否保留无目标的切片？")
     print("  提示: 输入 y/yes 保留，直接回车或 n/no 不保留")
     keep_input = input("  >>> ").strip().lower()
-    config['keep_empty'] = keep_input in ['y', 'yes']
+    config["keep_empty"] = keep_input in ["y", "yes"]
 
     # 确认配置
     print("\n" + "-" * 60)
@@ -165,7 +160,7 @@ def interactive_mode():
     print("-" * 60)
 
     confirm = input("\n  确认开始处理? (y/n) >>> ").strip().lower()
-    if confirm not in ['y', 'yes']:
+    if confirm not in ["y", "yes"]:
         print("  已取消")
         sys.exit(0)
 
@@ -173,9 +168,18 @@ def interactive_mode():
 
 
 def slice_single_image(args):
-    """处理单张图像的切片"""
-    img_path, label_path, output_images_dir, output_labels_dir, \
-        tile_size, overlap, min_bbox_ratio, keep_empty, img_idx = args
+    """处理单张图像的切片."""
+    (
+        img_path,
+        label_path,
+        output_images_dir,
+        output_labels_dir,
+        tile_size,
+        overlap,
+        min_bbox_ratio,
+        keep_empty,
+        _img_idx,
+    ) = args
 
     # 读取图像
     img = cv2.imread(str(img_path))
@@ -194,10 +198,10 @@ def slice_single_image(args):
                     cls = int(parts[0])
                     x, y, bw, bh = map(float, parts[1:5])
                     # 转换为像素坐标 (x1, y1, x2, y2)
-                    x1 = (x - bw/2) * w
-                    y1 = (y - bh/2) * h
-                    x2 = (x + bw/2) * w
-                    y2 = (y + bh/2) * h
+                    x1 = (x - bw / 2) * w
+                    y1 = (y - bh / 2) * h
+                    x2 = (x + bw / 2) * w
+                    y2 = (y + bh / 2) * h
                     labels.append([cls, x1, y1, x2, y2])
 
     stride = tile_size - overlap
@@ -252,13 +256,13 @@ def slice_single_image(args):
 
             # 保存切片
             if tile_labels or keep_empty:
-                tile = img[y0:y0+tile_size, x0:x0+tile_size]
+                tile = img[y0 : y0 + tile_size, x0 : x0 + tile_size]
                 tile_name = f"{base_name}_{x0}_{y0}"
 
                 cv2.imwrite(str(output_images_dir / f"{tile_name}.jpg"), tile)
 
-                with open(output_labels_dir / f"{tile_name}.txt", 'w') as f:
-                    f.write('\n'.join(tile_labels))
+                with open(output_labels_dir / f"{tile_name}.txt", "w") as f:
+                    f.write("\n".join(tile_labels))
 
                 tile_count += 1
                 label_count += len(tile_labels)
@@ -267,20 +271,20 @@ def slice_single_image(args):
 
 
 def process_dataset(config):
-    """处理整个数据集"""
-    images_dirs = config['images']
-    labels_dirs = config['labels']
-    output_dir = Path(config['output'])
-    tile_size = config['tile_size']
-    overlap = config['overlap']
-    min_bbox_ratio = config['min_bbox_ratio']
-    keep_empty = config['keep_empty']
-    workers = config.get('workers', 8)
-    ext = config.get('ext', 'jpg')
+    """处理整个数据集."""
+    images_dirs = config["images"]
+    labels_dirs = config["labels"]
+    output_dir = Path(config["output"])
+    tile_size = config["tile_size"]
+    overlap = config["overlap"]
+    min_bbox_ratio = config["min_bbox_ratio"]
+    keep_empty = config["keep_empty"]
+    workers = config.get("workers", 8)
+    ext = config.get("ext", "jpg")
 
     # 创建输出目录
-    output_images_dir = output_dir / 'images'
-    output_labels_dir = output_dir / 'labels'
+    output_images_dir = output_dir / "images"
+    output_labels_dir = output_dir / "labels"
     output_images_dir.mkdir(parents=True, exist_ok=True)
     output_labels_dir.mkdir(parents=True, exist_ok=True)
 
@@ -290,18 +294,25 @@ def process_dataset(config):
         img_dir = Path(img_dir)
         label_dir = Path(label_dir)
 
-        for img_path in img_dir.glob(f'*.{ext}'):
+        for img_path in img_dir.glob(f"*.{ext}"):
             label_path = label_dir / f"{img_path.stem}.txt"
             if not label_path.exists():
                 # 尝试在同一目录查找
                 label_path = img_dir / f"{img_path.stem}.txt"
 
-            all_tasks.append((
-                img_path, label_path if label_path.exists() else None,
-                output_images_dir, output_labels_dir,
-                tile_size, overlap, min_bbox_ratio, keep_empty,
-                len(all_tasks)
-            ))
+            all_tasks.append(
+                (
+                    img_path,
+                    label_path if label_path.exists() else None,
+                    output_images_dir,
+                    output_labels_dir,
+                    tile_size,
+                    overlap,
+                    min_bbox_ratio,
+                    keep_empty,
+                    len(all_tasks),
+                )
+            )
 
     print(f"\n找到 {len(all_tasks)} 张图像")
     print(f"输出目录: {output_dir}")
@@ -326,20 +337,20 @@ def process_dataset(config):
 
     # 保存处理信息
     info = {
-        'source_dirs': [str(p) for p in images_dirs],
-        'label_dirs': [str(p) for p in labels_dirs],
-        'output_dir': str(output_dir),
-        'tile_size': tile_size,
-        'overlap': overlap,
-        'min_bbox_ratio': min_bbox_ratio,
-        'keep_empty': keep_empty,
-        'total_images': len(all_tasks),
-        'total_tiles': total_tiles,
-        'total_labels': total_labels,
-        'errors': errors
+        "source_dirs": [str(p) for p in images_dirs],
+        "label_dirs": [str(p) for p in labels_dirs],
+        "output_dir": str(output_dir),
+        "tile_size": tile_size,
+        "overlap": overlap,
+        "min_bbox_ratio": min_bbox_ratio,
+        "keep_empty": keep_empty,
+        "total_images": len(all_tasks),
+        "total_tiles": total_tiles,
+        "total_labels": total_labels,
+        "errors": errors,
     }
 
-    with open(output_dir / 'slice_info.json', 'w') as f:
+    with open(output_dir / "slice_info.json", "w") as f:
         json.dump(info, f, indent=2, ensure_ascii=False)
 
     print("\n" + "=" * 60)
@@ -362,23 +373,23 @@ def main():
     # 判断是否进入交互模式
     if args.interactive or not (args.images and args.labels and args.output):
         config = interactive_mode()
-        config['workers'] = 8
-        config['ext'] = 'jpg'
+        config["workers"] = 8
+        config["ext"] = "jpg"
     else:
         config = {
-            'images': args.images,
-            'labels': args.labels,
-            'output': args.output,
-            'tile_size': args.tile_size,
-            'overlap': args.overlap,
-            'min_bbox_ratio': args.min_bbox_ratio,
-            'keep_empty': args.keep_empty,
-            'workers': args.workers,
-            'ext': args.ext
+            "images": args.images,
+            "labels": args.labels,
+            "output": args.output,
+            "tile_size": args.tile_size,
+            "overlap": args.overlap,
+            "min_bbox_ratio": args.min_bbox_ratio,
+            "keep_empty": args.keep_empty,
+            "workers": args.workers,
+            "ext": args.ext,
         }
 
     process_dataset(config)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

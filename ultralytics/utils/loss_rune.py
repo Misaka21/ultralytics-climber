@@ -15,7 +15,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from ultralytics.utils.loss import v8PoseLoss, KeypointLoss
+from ultralytics.utils.loss import v8PoseLoss
 from ultralytics.utils.ops import xyxy2xywh
 
 
@@ -166,12 +166,11 @@ class CyclicRotationKeypointLoss(nn.Module):
 class RunePoseLoss(v8PoseLoss):
     """Pose loss for rune detection with rotation invariance.
 
-    This loss extends v8PoseLoss to use CyclicRotationKeypointLoss for handling
-    the 4-fold symmetry of rune targets. When all 8 keypoints are visible
-    (rune_targeting class), the loss is computed across all 4 rotations and
-    the minimum is used as the final loss.
+    This loss extends v8PoseLoss to use CyclicRotationKeypointLoss for handling the 4-fold symmetry of rune targets.
+    When all 8 keypoints are visible (rune_targeting class), the loss is computed across all 4 rotations and the minimum
+    is used as the final loss.
 
-    Example:
+    Examples:
         >>> from ultralytics.utils.loss_rune import RunePoseLoss
         >>> loss_fn = RunePoseLoss(model)
         >>> loss, loss_items = loss_fn(predictions, batch)
@@ -227,8 +226,7 @@ class RunePoseLoss(v8PoseLoss):
 
         # Create batched keypoints tensor
         batched_keypoints = torch.zeros(
-            (batch_size, max_kpts, keypoints.shape[1], keypoints.shape[2]),
-            device=keypoints.device
+            (batch_size, max_kpts, keypoints.shape[1], keypoints.shape[2]), device=keypoints.device
         )
 
         # Fill batched_keypoints

@@ -60,17 +60,6 @@ from .block import (
     SCDown,
     TorchVision,
 )
-from .mobilenet import (
-    HSwish,
-    HSigmoid,
-    MobileNetV3Block,
-    MobileNetV3Downsample,
-    MobileNetV3Large,
-    MobileNetV3Small,
-    MobileNetV3Stage,
-    MobileNetV3Stem,
-    SEBlock,
-)
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -99,6 +88,17 @@ from .head import (
     YOLOEDetect,
     YOLOESegment,
     v10Detect,
+)
+from .mobilenet import (
+    HSigmoid,
+    HSwish,
+    MobileNetV3Block,
+    MobileNetV3Downsample,
+    MobileNetV3Large,
+    MobileNetV3Small,
+    MobileNetV3Stage,
+    MobileNetV3Stem,
+    SEBlock,
 )
 from .transformer import (
     AIFI,
@@ -171,14 +171,14 @@ __all__ = (
     "LayerNorm2d",
     "LightConv",
     "MLPBlock",
+    "MSDeformAttn",
+    "MaxSigmoidAttnBlock",
     "MobileNetV3Block",
     "MobileNetV3Downsample",
     "MobileNetV3Large",
     "MobileNetV3Small",
     "MobileNetV3Stage",
     "MobileNetV3Stem",
-    "MSDeformAttn",
-    "MaxSigmoidAttnBlock",
     "Pose",
     "Proto",
     "RTDETRDecoder",
