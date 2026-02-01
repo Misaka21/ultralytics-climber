@@ -1,5 +1,12 @@
 # Ultralytics AGPL-3.0 License - https://ultralytics.com/license
-"""Armor plate pose training module with optimized loss function."""
+"""Armor plate pose training module with optimized loss function.
+
+This module implements TUP-NN-Train-2 style training optimizations:
+- WingLoss for better handling of small errors
+- Staged training (WingLoss → L1 after 40%)
+- IoU-weighted soft labels
+- High pose loss weight (80-100x)
+"""
 
 from __future__ import annotations
 
@@ -9,7 +16,7 @@ from typing import Any
 
 from ultralytics.models.yolo.pose.train import PoseTrainer
 from ultralytics.nn.tasks import PoseModel
-from ultralytics.utils import DEFAULT_CFG
+from ultralytics.utils import DEFAULT_CFG, LOGGER
 
 
 class ArmorPoseModel(PoseModel):
@@ -35,10 +42,11 @@ class ArmorPoseModel(PoseModel):
 class ArmorPoseTrainer(PoseTrainer):
     """Trainer class optimized for armor plate pose estimation.
 
-    This trainer extends PoseTrainer with:
+    This trainer extends PoseTrainer with TUP-NN-Train-2 style optimizations:
     - Optimized loss function for 4-point keypoint detection
-    - Better hyperparameter defaults for armor plate detection
-    - Support for smaller input sizes and faster training
+    - Staged training (WingLoss → L1 after 40% epochs)
+    - IoU-weighted soft labels
+    - High pose loss weight (80-100x)
 
     Example:
         >>> from ultralytics.models.yolo.pose.train_armor import ArmorPoseTrainer
@@ -64,6 +72,7 @@ class ArmorPoseTrainer(PoseTrainer):
         overrides["task"] = "pose"
 
         # Set optimized defaults for armor plate detection
+        # Key insight from TUP-NN-Train-2: extremely high pose weight (80-100) is critical
         armor_defaults = {
             "imgsz": 640,          # Default image size
             "batch": 16,           # Batch size
@@ -77,7 +86,7 @@ class ArmorPoseTrainer(PoseTrainer):
             "box": 7.5,            # Box loss gain
             "cls": 0.5,            # Cls loss gain
             "dfl": 1.5,            # DFL loss gain
-            "pose": 12.0,          # Pose loss gain (increased for armor)
+            "pose": 80.0,          # Pose loss gain (TUP uses 80-100, critical for accuracy!)
             "kobj": 1.0,           # Keypoint obj loss gain
             "close_mosaic": 10,    # Close mosaic last N epochs
         }
@@ -88,6 +97,45 @@ class ArmorPoseTrainer(PoseTrainer):
                 overrides[key] = value
 
         super().__init__(cfg, overrides, _callbacks)
+
+        # Track if L1 mode has been enabled for staged training
+        self._l1_enabled = False
+
+        # Add staged training callback
+        self.add_callback("on_train_epoch_start", self._staged_training_callback)
+
+    def _staged_training_callback(self, trainer):
+        """Callback for staged training: switch from WingLoss to L1 after 40% epochs.
+
+        This follows TUP-NN-Train-2's strategy:
+        - First 40%: WingLoss for fast convergence
+        - After 40%: L1 loss for fine-tuning
+
+        Args:
+            trainer: The trainer instance.
+        """
+        if self._l1_enabled:
+            return  # Already enabled, skip
+
+        # Check if we've passed 40% of training
+        staged_epoch = int(self.epochs * 0.4)
+        if self.epoch >= staged_epoch:
+            # Get the loss function from the model
+            model = trainer.model
+            if hasattr(model, 'model') and hasattr(model.model[-1], 'stride'):
+                # Try to get the criterion
+                try:
+                    from ultralytics.utils.torch_utils import unwrap_model
+                    unwrapped = unwrap_model(model)
+                    if hasattr(unwrapped, 'criterion') and hasattr(unwrapped.criterion, 'enable_l1_finetuning'):
+                        unwrapped.criterion.enable_l1_finetuning()
+                        self._l1_enabled = True
+                        LOGGER.info(
+                            f"Staged training: Switching from WingLoss to L1 at epoch {self.epoch} "
+                            f"(40% = {staged_epoch} epochs)"
+                        )
+                except Exception as e:
+                    LOGGER.warning(f"Could not enable L1 fine-tuning: {e}")
 
     def get_model(
         self,

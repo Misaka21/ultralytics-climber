@@ -1,19 +1,25 @@
 # Rune Pose Dataset Configuration
 # For detecting rune targets with keypoints
+# Dataset: rune_blender_opensource (Blender rendered rune data)
 
-path: /media/nuc11/common/RM/RMCV/YOLO/data/rune_blender_opensource/render_video
+path: /media/nuc11/common/RM/RMCV/YOLO/data/rune_blender_opensource/output_processed
 train: images
 val: images
 
 # Keypoints configuration - use 8 keypoints (max for class 1)
 # Classes with fewer keypoints will have visibility=0 for unused ones
+# Class 0/2: 4 visible + 4 invisible keypoints
+# Class 1: 8 visible keypoints
+# Class 3: 8 invisible keypoints (center R, bbox only)
 kpt_shape: [8, 3]  # 8 keypoints, 3 dimensions (x, y, visibility)
 
 # Class names
 names:
-  0: rune_inactive   # 未开的符 (4 keypoints)
-  1: rune_targeting  # 瞄准中的符 (8 keypoints)
-  2: rune_hit        # 已打的符 (4 keypoints)
+  0: rune_inactive   # 未开的符 (4 keypoints visible)
+  1: rune_targeting  # 瞄准中的符 (8 keypoints visible)
+  2: rune_hit        # 已打的符 (4 keypoints visible)
   3: rune_center     # 中心点 R (no keypoints, bbox only)
 
+# Keypoint flip indices (for horizontal flip augmentation)
+# For rune symbols, flipping may not make sense, but we keep symmetric indices
 flip_idx: [0, 1, 2, 3, 4, 5, 6, 7]

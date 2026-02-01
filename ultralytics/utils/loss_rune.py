@@ -15,8 +15,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from ultralytics.utils.loss import v8PoseLoss, KeypointLoss
-from ultralytics.utils.ops import xyxy2xywh
+from ultralytics.utils.loss import v8PoseLoss
 
 
 class CyclicRotationKeypointLoss(nn.Module):
@@ -28,21 +27,11 @@ class CyclicRotationKeypointLoss(nn.Module):
     - Maintains intra-group order (left point stays left of right point)
     - Maintains inter-group order (counterclockwise sequence preserved)
 
-    Keypoint grouping:
-    - Group 0: [kpt7, kpt0]  # kpt7 left, kpt0 right
-    - Group 1: [kpt1, kpt2]  # kpt1 left, kpt2 right
-    - Group 2: [kpt3, kpt4]  # kpt3 left, kpt4 right
-    - Group 3: [kpt5, kpt6]  # kpt5 left, kpt6 right
-
     4 cyclic rotation index permutations:
     - rot0 (0 deg):   [0,1,2,3,4,5,6,7]  # original
     - rot1 (90 deg):  [2,3,4,5,6,7,0,1]  # shift by 2 positions
     - rot2 (180 deg): [4,5,6,7,0,1,2,3]  # shift by 4 positions
     - rot3 (270 deg): [6,7,0,1,2,3,4,5]  # shift by 6 positions
-
-    Attributes:
-        sigmas (torch.Tensor): Per-keypoint sigma values for OKS calculation.
-        ROTATIONS (list): Index permutations for 4 cyclic rotations.
     """
 
     ROTATIONS = [
@@ -60,40 +49,6 @@ class CyclicRotationKeypointLoss(nn.Module):
         """
         super().__init__()
         self.sigmas = sigmas
-
-    def _compute_oks_loss(
-        self,
-        pred_kpts: torch.Tensor,
-        gt_kpts: torch.Tensor,
-        kpt_mask: torch.Tensor,
-        area: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute OKS-based keypoint loss for a single rotation.
-
-        Args:
-            pred_kpts (torch.Tensor): Predicted keypoints, shape (N, 8, 2 or 3).
-            gt_kpts (torch.Tensor): Ground truth keypoints, shape (N, 8, 2 or 3).
-            kpt_mask (torch.Tensor): Visibility mask, shape (N, 8).
-            area (torch.Tensor): Bounding box area, shape (N, 1).
-
-        Returns:
-            (torch.Tensor): Per-sample loss, shape (N,).
-        """
-        # Euclidean distance squared
-        d = (pred_kpts[..., 0] - gt_kpts[..., 0]).pow(2) + (pred_kpts[..., 1] - gt_kpts[..., 1]).pow(2)
-
-        # Loss factor based on visible keypoints
-        kpt_loss_factor = kpt_mask.shape[1] / (torch.sum(kpt_mask != 0, dim=1) + 1e-9)
-
-        # OKS-based loss
-        sigmas = self.sigmas.to(d.device)
-        e = d / ((2 * sigmas).pow(2) * (area + 1e-9) * 2)
-        oks_loss = (1 - torch.exp(-e)) * kpt_mask
-
-        # Per-sample loss (sum over keypoints)
-        per_sample_loss = (kpt_loss_factor.view(-1, 1) * oks_loss).sum(dim=1)
-
-        return per_sample_loss
 
     def forward(
         self,
@@ -124,8 +79,8 @@ class CyclicRotationKeypointLoss(nn.Module):
         visible_count = kpt_mask.sum(dim=1)
         full_visible_mask = visible_count == 8  # Only apply rotation invariance to these
 
-        # Initialize loss tensor
-        final_loss = torch.zeros(n_samples, device=pred_kpts.device)
+        # Initialize per-sample loss tensor
+        all_losses = torch.zeros(n_samples, pred_kpts.shape[1], device=pred_kpts.device)
 
         # Process samples with all 8 keypoints visible (rotation-invariant)
         if full_visible_mask.any():
@@ -140,14 +95,24 @@ class CyclicRotationKeypointLoss(nn.Module):
                 # Reorder ground truth keypoints according to rotation
                 gt_rotated = gt_full[:, rot_idx, :]
                 mask_rotated = mask_full[:, rot_idx]
-                loss = self._compute_oks_loss(pred_full, gt_rotated, mask_rotated, area_full)
+                loss = self._compute_oks_loss_per_sample(pred_full, gt_rotated, mask_rotated, area_full)
                 rotation_losses.append(loss)
 
-            # Stack and take minimum across rotations for each sample
-            stacked_losses = torch.stack(rotation_losses, dim=0)  # (4, N_full)
-            min_loss, _ = stacked_losses.min(dim=0)  # (N_full,)
+            # Stack losses: (4, N_full, 8)
+            stacked_losses = torch.stack(rotation_losses, dim=0)
 
-            final_loss[full_visible_mask] = min_loss
+            # Sum across keypoints to get total loss per rotation per sample: (4, N_full)
+            loss_per_rotation = stacked_losses.sum(dim=2)
+
+            # Find the best rotation for each sample (minimum total loss)
+            best_rot_idx = loss_per_rotation.argmin(dim=0)  # (N_full,)
+
+            # Gather the per-keypoint losses from the best rotation for each sample
+            n_full = pred_full.shape[0]
+            batch_idx = torch.arange(n_full, device=pred_full.device)
+            best_losses = stacked_losses[best_rot_idx, batch_idx, :]  # (N_full, 8)
+
+            all_losses[full_visible_mask] = best_losses
 
         # Process samples with partial visibility (standard loss, no rotation invariance)
         partial_mask = ~full_visible_mask
@@ -157,24 +122,48 @@ class CyclicRotationKeypointLoss(nn.Module):
             mask_partial = kpt_mask[partial_mask]
             area_partial = area[partial_mask]
 
-            partial_loss = self._compute_oks_loss(pred_partial, gt_partial, mask_partial, area_partial)
-            final_loss[partial_mask] = partial_loss
+            partial_loss = self._compute_oks_loss_per_sample(pred_partial, gt_partial, mask_partial, area_partial)
+            all_losses[partial_mask] = partial_loss
 
-        return final_loss.mean()
+        # Apply kpt_loss_factor and kpt_mask, then take mean (matching original KeypointLoss)
+        kpt_loss_factor = kpt_mask.shape[1] / (kpt_mask.sum(dim=1, keepdim=True) + 1e-9)
+        return (kpt_loss_factor * all_losses * kpt_mask).mean()
+
+    def _compute_oks_loss_per_sample(
+        self,
+        pred_kpts: torch.Tensor,
+        gt_kpts: torch.Tensor,
+        kpt_mask: torch.Tensor,
+        area: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute OKS-based keypoint loss per sample per keypoint.
+
+        Args:
+            pred_kpts (torch.Tensor): Predicted keypoints, shape (N, 8, 2 or 3).
+            gt_kpts (torch.Tensor): Ground truth keypoints, shape (N, 8, 2 or 3).
+            kpt_mask (torch.Tensor): Visibility mask, shape (N, 8).
+            area (torch.Tensor): Bounding box area, shape (N, 1).
+
+        Returns:
+            (torch.Tensor): Per-sample per-keypoint loss, shape (N, 8).
+        """
+        # Euclidean distance squared
+        d = (pred_kpts[..., 0] - gt_kpts[..., 0]).pow(2) + (pred_kpts[..., 1] - gt_kpts[..., 1]).pow(2)
+
+        # OKS-based loss
+        sigmas = self.sigmas.to(d.device)
+        e = d / ((2 * sigmas).pow(2) * (area + 1e-9) * 2)
+        oks_loss = 1 - torch.exp(-e)
+
+        return oks_loss
 
 
 class RunePoseLoss(v8PoseLoss):
     """Pose loss for rune detection with rotation invariance.
 
     This loss extends v8PoseLoss to use CyclicRotationKeypointLoss for handling
-    the 4-fold symmetry of rune targets. When all 8 keypoints are visible
-    (rune_targeting class), the loss is computed across all 4 rotations and
-    the minimum is used as the final loss.
-
-    Example:
-        >>> from ultralytics.utils.loss_rune import RunePoseLoss
-        >>> loss_fn = RunePoseLoss(model)
-        >>> loss, loss_items = loss_fn(predictions, batch)
+    the 4-fold symmetry of rune targets. Only the keypoint_loss is replaced;
+    all other processing remains unchanged from the parent class.
     """
 
     def __init__(self, model):
@@ -185,89 +174,8 @@ class RunePoseLoss(v8PoseLoss):
         """
         super().__init__(model)
 
-        # Override with rune-specific settings
+        # Override keypoint_loss with rotation-invariant version
+        # Use the same sigmas as the original v8PoseLoss (1/nkpt for non-COCO)
         nkpt = self.kpt_shape[0]  # Should be 8 for rune
-
-        # Use smaller sigma values for tighter keypoint constraints
-        sigmas = torch.ones(nkpt, device=self.device) * 0.05
-
-        # Use rotation-invariant keypoint loss
+        sigmas = torch.ones(nkpt, device=self.device) / nkpt  # 1/8 = 0.125, matching original
         self.keypoint_loss = CyclicRotationKeypointLoss(sigmas=sigmas)
-
-    def calculate_keypoints_loss(
-        self,
-        masks: torch.Tensor,
-        target_gt_idx: torch.Tensor,
-        keypoints: torch.Tensor,
-        batch_idx: torch.Tensor,
-        stride_tensor: torch.Tensor,
-        target_bboxes: torch.Tensor,
-        pred_kpts: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Calculate keypoints loss with rotation invariance for rune targets.
-
-        Args:
-            masks (torch.Tensor): Binary mask indicating object presence, shape (BS, N_anchors).
-            target_gt_idx (torch.Tensor): Index mapping anchors to GT objects, shape (BS, N_anchors).
-            keypoints (torch.Tensor): Ground truth keypoints, shape (N_kpts_in_batch, N_kpts_per_object, kpts_dim).
-            batch_idx (torch.Tensor): Batch index for keypoints, shape (N_kpts_in_batch, 1).
-            stride_tensor (torch.Tensor): Stride for anchors, shape (N_anchors, 1).
-            target_bboxes (torch.Tensor): Ground truth boxes in (x1, y1, x2, y2), shape (BS, N_anchors, 4).
-            pred_kpts (torch.Tensor): Predicted keypoints, shape (BS, N_anchors, N_kpts_per_object, kpts_dim).
-
-        Returns:
-            kpts_loss (torch.Tensor): The keypoints location loss.
-            kpts_obj_loss (torch.Tensor): The keypoints visibility loss.
-        """
-        batch_idx = batch_idx.flatten()
-        batch_size = len(masks)
-
-        # Find max keypoints in a single image
-        max_kpts = torch.unique(batch_idx, return_counts=True)[1].max()
-
-        # Create batched keypoints tensor
-        batched_keypoints = torch.zeros(
-            (batch_size, max_kpts, keypoints.shape[1], keypoints.shape[2]),
-            device=keypoints.device
-        )
-
-        # Fill batched_keypoints
-        for i in range(batch_size):
-            keypoints_i = keypoints[batch_idx == i]
-            batched_keypoints[i, : keypoints_i.shape[0]] = keypoints_i
-
-        # Select keypoints using target indices
-        target_gt_idx_expanded = target_gt_idx.unsqueeze(-1).unsqueeze(-1)
-        selected_keypoints = batched_keypoints.gather(
-            1, target_gt_idx_expanded.expand(-1, -1, keypoints.shape[1], keypoints.shape[2])
-        )
-
-        # Normalize by stride
-        selected_keypoints[..., :2] /= stride_tensor.view(1, -1, 1, 1)
-
-        kpts_loss = torch.tensor(0.0, device=self.device)
-        kpts_obj_loss = torch.tensor(0.0, device=self.device)
-
-        if masks.any():
-            gt_kpt = selected_keypoints[masks]
-            pred_kpt = pred_kpts[masks]
-
-            # Calculate area with minimum threshold for small boxes
-            area = xyxy2xywh(target_bboxes[masks])[:, 2:].prod(1, keepdim=True)
-            area = torch.clamp(area, min=1.0)
-
-            # Keypoint visibility mask
-            if gt_kpt.shape[-1] == 3:
-                kpt_mask = gt_kpt[..., 2] != 0
-            else:
-                # For 2D keypoints, all keypoints are always visible
-                kpt_mask = torch.ones_like(gt_kpt[..., 0], dtype=torch.bool)
-
-            # Main keypoint loss (with rotation invariance)
-            kpts_loss = self.keypoint_loss(pred_kpt, gt_kpt, kpt_mask.float(), area)
-
-            # Visibility loss (only for 3D keypoints)
-            if pred_kpt.shape[-1] == 3:
-                kpts_obj_loss = self.bce_pose(pred_kpt[..., 2], kpt_mask.float()).mean()
-
-        return kpts_loss, kpts_obj_loss
