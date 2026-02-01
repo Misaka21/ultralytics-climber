@@ -53,6 +53,7 @@ dataset/
 ```
 
 标签格式（每行一个目标）：
+
 ```
 class_id x_center y_center width height kpt1_x kpt1_y kpt2_x kpt2_y kpt3_x kpt3_y kpt4_x kpt4_y
 ```
@@ -73,28 +74,33 @@ val: images/val
 ### 3. 训练模型
 
 方式一：使用训练脚本
+
 ```bash
 python examples/train_armor_pose.py
 ```
 
 方式二：使用命令行
+
 ```bash
 yolo pose train model=ultralytics/cfg/models/armor/armor-pose-mobilenet.yaml \
-    data=ultralytics/cfg/datasets/armor_plate.yaml \
-    epochs=200 imgsz=640 batch=16
+  data=ultralytics/cfg/datasets/armor_plate.yaml \
+  epochs=200 imgsz=640 batch=16
 ```
 
 方式三：使用Python API
+
 ```python
 from ultralytics.models.yolo.pose.train_armor import ArmorPoseTrainer
 
-trainer = ArmorPoseTrainer(overrides={
-    "model": "ultralytics/cfg/models/armor/armor-pose-mobilenet.yaml",
-    "data": "ultralytics/cfg/datasets/armor_plate.yaml",
-    "epochs": 200,
-    "imgsz": 640,
-    "batch": 16,
-})
+trainer = ArmorPoseTrainer(
+    overrides={
+        "model": "ultralytics/cfg/models/armor/armor-pose-mobilenet.yaml",
+        "data": "ultralytics/cfg/datasets/armor_plate.yaml",
+        "epochs": 200,
+        "imgsz": 640,
+        "batch": 16,
+    }
+)
 trainer.train()
 ```
 
@@ -133,11 +139,13 @@ model.export(format="onnx", imgsz=640, half=True, simplify=True)
 ## 模型缩放
 
 模型支持多种尺寸：
+
 - `n` (nano): 最小最快
 - `s` (small): 平衡速度和精度
 - `m` (medium): 更高精度
 
 在配置文件中通过 `scale` 参数选择：
+
 ```bash
 yolo pose train model=armor-pose-mobilenet.yaml scale=s ...
 ```

@@ -6,15 +6,15 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from .conv import Conv, autopad
+from .conv import autopad
 
 __all__ = (
-    "MobileNetV3Block",
-    "MobileNetV3Stem",
-    "MobileNetV3Stage",
-    "SEBlock",
-    "HSwish",
     "HSigmoid",
+    "HSwish",
+    "MobileNetV3Block",
+    "MobileNetV3Stage",
+    "MobileNetV3Stem",
+    "SEBlock",
 )
 
 
@@ -47,8 +47,8 @@ class HSwish(nn.Module):
 class SEBlock(nn.Module):
     """Squeeze-and-Excitation block for channel attention.
 
-    This module implements channel-wise attention mechanism that adaptively
-    recalibrates channel features by modeling channel interdependencies.
+    This module implements channel-wise attention mechanism that adaptively recalibrates channel features by modeling
+    channel interdependencies.
     """
 
     def __init__(self, c1: int, reduction: int = 4):
@@ -79,8 +79,8 @@ class SEBlock(nn.Module):
 class MobileNetV3Block(nn.Module):
     """MobileNetV3 inverted residual block with optional SE attention.
 
-    This block implements the core building block of MobileNetV3 architecture,
-    featuring expansion, depthwise convolution, SE attention, and projection.
+    This block implements the core building block of MobileNetV3 architecture, featuring expansion, depthwise
+    convolution, SE attention, and projection.
     """
 
     def __init__(
@@ -117,28 +117,34 @@ class MobileNetV3Block(nn.Module):
 
         # Expansion phase (only if expansion ratio > 1)
         if e != 1.0:
-            layers.extend([
-                nn.Conv2d(c1, c_, 1, 1, 0, bias=False),
-                nn.BatchNorm2d(c_),
-                activation,
-            ])
+            layers.extend(
+                [
+                    nn.Conv2d(c1, c_, 1, 1, 0, bias=False),
+                    nn.BatchNorm2d(c_),
+                    activation,
+                ]
+            )
 
         # Depthwise phase
-        layers.extend([
-            nn.Conv2d(c_, c_, k, s, autopad(k), groups=c_, bias=False),
-            nn.BatchNorm2d(c_),
-            activation,
-        ])
+        layers.extend(
+            [
+                nn.Conv2d(c_, c_, k, s, autopad(k), groups=c_, bias=False),
+                nn.BatchNorm2d(c_),
+                activation,
+            ]
+        )
 
         # SE attention
         if se:
             layers.append(SEBlock(c_))
 
         # Projection phase (linear - no activation)
-        layers.extend([
-            nn.Conv2d(c_, c2, 1, 1, 0, bias=False),
-            nn.BatchNorm2d(c2),
-        ])
+        layers.extend(
+            [
+                nn.Conv2d(c_, c2, 1, 1, 0, bias=False),
+                nn.BatchNorm2d(c2),
+            ]
+        )
 
         self.block = nn.Sequential(*layers)
 
@@ -177,8 +183,7 @@ class MobileNetV3Stem(nn.Module):
 class MobileNetV3Stage(nn.Module):
     """MobileNetV3 stage containing multiple inverted residual blocks.
 
-    This module stacks multiple MobileNetV3 blocks to form a stage,
-    optionally with downsampling in the first block.
+    This module stacks multiple MobileNetV3 blocks to form a stage, optionally with downsampling in the first block.
     """
 
     def __init__(
@@ -250,8 +255,7 @@ class MobileNetV3Downsample(nn.Module):
 class MobileNetV3Large(nn.Module):
     """Complete MobileNetV3-Large backbone for feature extraction.
 
-    This module implements the full MobileNetV3-Large architecture
-    and returns multi-scale features for detection tasks.
+    This module implements the full MobileNetV3-Large architecture and returns multi-scale features for detection tasks.
     """
 
     def __init__(self, c1: int = 3, width_mult: float = 1.0):
@@ -320,7 +324,7 @@ class MobileNetV3Large(nn.Module):
         x = self.stem(x)
         x = self.stage1(x)
 
-        p3 = self.stage2(x)   # 1/8
+        p3 = self.stage2(x)  # 1/8
         p4 = self.stage3(p3)  # 1/16
         p5 = self.stage4(p4)  # 1/32
 
@@ -388,7 +392,7 @@ class MobileNetV3Small(nn.Module):
         x = self.stem(x)
         x = self.stage1(x)
 
-        p3 = self.stage2(x)   # 1/8
+        p3 = self.stage2(x)  # 1/8
         p4 = self.stage3(p3)  # 1/16
         p5 = self.stage4(p4)  # 1/32
 
