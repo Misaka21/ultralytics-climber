@@ -4,8 +4,8 @@
 
 # Dataset paths
 path: /media/nuc11/common/RM/RMCV/YOLO/data/radardataset/armor_dataset/armor_dataset_v4
-train: images  # train images (relative to 'path')
-val: images    # val images - same as train, will use autosplit
+train: images # train images (relative to 'path')
+val: images # val images - same as train, will use autosplit
 
 # Number of classes
 nc: 12
@@ -26,7 +26,6 @@ names:
   9: R4
   10: R5
   11: R7
-
 # Notes:
 # - Dataset contains 31001 images
 # - Label format: class_id x_center y_center width height (normalized)

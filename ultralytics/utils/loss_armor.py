@@ -7,9 +7,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ultralytics.utils.loss import v8PoseLoss, KeypointLoss
-from ultralytics.utils.ops import xywh2xyxy, xyxy2xywh
-from ultralytics.utils.tal import make_anchors
+from ultralytics.utils.loss import v8PoseLoss
+from ultralytics.utils.ops import xyxy2xywh
 
 
 class ArmorKeypointLoss(nn.Module):
@@ -57,19 +56,11 @@ class ArmorKeypointLoss(nn.Module):
         diff = torch.abs(pred - target)
         # For small errors, use log-based loss (stronger gradient)
         small_mask = diff < self.w
-        loss = torch.where(
-            small_mask,
-            self.w * torch.log(1 + diff / self.epsilon),
-            diff - self.C.to(diff.device)
-        )
+        loss = torch.where(small_mask, self.w * torch.log(1 + diff / self.epsilon), diff - self.C.to(diff.device))
         return loss
 
     def forward(
-        self,
-        pred_kpts: torch.Tensor,
-        gt_kpts: torch.Tensor,
-        kpt_mask: torch.Tensor,
-        area: torch.Tensor
+        self, pred_kpts: torch.Tensor, gt_kpts: torch.Tensor, kpt_mask: torch.Tensor, area: torch.Tensor
     ) -> torch.Tensor:
         """Calculate keypoint loss with Wing Loss and OKS-based weighting.
 
@@ -117,7 +108,7 @@ class ArmorPoseLoss(v8PoseLoss):
     3. Adjusted loss weight ratios for faster convergence
     4. IoU-aware keypoint loss weighting
 
-    Example:
+    Examples:
         >>> from ultralytics.utils.loss_armor import ArmorPoseLoss
         >>> loss_fn = ArmorPoseLoss(model)
         >>> loss, loss_items = loss_fn(predictions, batch)
@@ -182,8 +173,7 @@ class ArmorPoseLoss(v8PoseLoss):
 
         # Create batched keypoints tensor
         batched_keypoints = torch.zeros(
-            (batch_size, max_kpts, keypoints.shape[1], keypoints.shape[2]),
-            device=keypoints.device
+            (batch_size, max_kpts, keypoints.shape[1], keypoints.shape[2]), device=keypoints.device
         )
 
         # Fill batched_keypoints
@@ -231,8 +221,7 @@ class ArmorPoseLoss(v8PoseLoss):
 class SmoothL1KeypointLoss(nn.Module):
     """Smooth L1 based keypoint loss for armor plate detection.
 
-    This is a simpler alternative that uses Smooth L1 loss
-    which is more stable for some training scenarios.
+    This is a simpler alternative that uses Smooth L1 loss which is more stable for some training scenarios.
     """
 
     def __init__(self, sigmas: torch.Tensor, beta: float = 1.0):
@@ -247,11 +236,7 @@ class SmoothL1KeypointLoss(nn.Module):
         self.beta = beta
 
     def forward(
-        self,
-        pred_kpts: torch.Tensor,
-        gt_kpts: torch.Tensor,
-        kpt_mask: torch.Tensor,
-        area: torch.Tensor
+        self, pred_kpts: torch.Tensor, gt_kpts: torch.Tensor, kpt_mask: torch.Tensor, area: torch.Tensor
     ) -> torch.Tensor:
         """Calculate Smooth L1 keypoint loss.
 
