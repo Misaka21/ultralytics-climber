@@ -5,7 +5,7 @@
 # Dataset paths
 path: /media/nuc11/common/RM/RMCV/YOLO/data/radardataset/car_dataset_sliced
 train: images
-val: images  # Will use autosplit
+val: images # Will use autosplit
 
 # Number of classes
 nc: 1
@@ -13,7 +13,6 @@ nc: 1
 # Class names
 names:
   0: car
-
 # Notes:
 # - Original images: 3840x2160 (4K)
 # - Sliced to: 640x640 tiles with 128px overlap

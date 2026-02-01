@@ -3,13 +3,13 @@
 # See https://docs.ultralytics.com/datasets/pose for dataset format
 
 # Dataset paths (modify these to your actual paths)
-path: /path/to/armor_dataset  # dataset root dir
-train: images/train  # train images (relative to 'path')
-val: images/val  # val images (relative to 'path')
-test:  # test images (optional)
+path: /path/to/armor_dataset # dataset root dir
+train: images/train # train images (relative to 'path')
+val: images/val # val images (relative to 'path')
+test: # test images (optional)
 
 # Keypoints configuration
-kpt_shape: [4, 2]  # 4 keypoints, 2 dimensions (x, y)
+kpt_shape: [4, 2] # 4 keypoints, 2 dimensions (x, y)
 
 # Class names
 names:
@@ -27,7 +27,6 @@ kpt_names:
 # When image is flipped horizontally:
 # top_left <-> top_right, bottom_left <-> bottom_right
 flip_idx: [1, 0, 3, 2]
-
 # Dataset notes:
 # - Each image should have a corresponding label file
 # - Label format (per line): class_id x_center y_center width height kpt1_x kpt1_y kpt2_x kpt2_y kpt3_x kpt3_y kpt4_x kpt4_y
