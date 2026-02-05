@@ -88,11 +88,22 @@ yolo pose train model=config/models/armor/armor-pose-mobilenet.yaml \
 
 ## ✨ 核心优化详解
 
+### 默认启用状态
+
+| Trick | 默认状态 | 说明 |
+|-------|---------|------|
+| **WingLoss** | ✅ 开启 | 自动使用，无需配置 |
+| **Sigma=0.05** | ✅ 开启 | 自动使用，比标准更严格 |
+| **IoU 加权软标签** | ✅ 开启 | 默认启用，可关闭 |
+| **分阶段训练** | ❌ 关闭 | 需要手动调用切换 |
+| **PolyIoU** | ❌ 关闭 | 需要手动替换损失 |
+| **旋转不变** | ❌ 关闭 | 只有用 `RunePoseTrainer` 才启用 |
+
 ### 1. 装甲板损失函数 (`loss_armor.py`)
 
 针对 **4 点角点检测** 任务优化，相比标准 YOLO Pose 有以下改进：
 
-#### 🔹 WingLoss - 小误差敏感
+#### 🔹 WingLoss - 小误差敏感 ✅ 默认开启
 
 ```python
 # 对小误差使用 log 损失，梯度更强，收敛更快
@@ -100,30 +111,36 @@ loss = w * log(1 + |x|/ε)   # 当 |x| < w 时
 loss = |x| - C               # 当 |x| >= w 时
 ```
 
+**默认参数：** `w=10.0, epsilon=2.0`
+
 **为什么用 WingLoss？**
 - 装甲板角点位置相对固定，小误差需要更精细的优化
 - L2 损失对小误差梯度太小，收敛慢
 - WingLoss 在误差小于 `w` 时使用对数损失，梯度更强
 
-#### 🔹 更小的 Sigma (0.05)
+#### 🔹 更小的 Sigma (0.05) ✅ 默认开启
 
 ```python
 # 标准 COCO 使用 0.067，我们使用更严格的 0.05
 sigmas = torch.ones(4) * 0.05  # 4个角点
 ```
 
+**默认状态：** 已在 `ArmorPoseLoss.__init__` 中设置
+
 **效果**：OKS 计算更严格，网络被迫学习更精确的位置
 
-#### 🔹 分阶段训练 (Staged Training)
+#### 🔹 分阶段训练 (Staged Training) ❌ 默认关闭
 
 ```python
 # 前 40% epochs：WingLoss（快速收敛到大致位置）
 # 后 60% epochs：切换为 L1 Loss（精细微调）
 ```
 
+**默认状态：** `use_l1 = False`，需要手动调用 `enable_l1_finetuning()` 开启
+
 **原理**：参考 TUP-NN-Train-2，先粗调后精调
 
-#### 🔹 IoU 加权软标签
+#### 🔹 IoU 加权软标签 ✅ 默认开启
 
 ```python
 # 分类损失根据预测框与 GT 的 IoU 加权
@@ -131,9 +148,13 @@ sigmas = torch.ones(4) * 0.05  # 4个角点
 cls_target *= pred_ious
 ```
 
-#### 🔹 PolyIoU Loss（可选）
+**默认状态：** `use_iou_weighted_cls=True`，可在构造函数中关闭
+
+#### 🔹 PolyIoU Loss（可选）❌ 默认关闭
 
 使用 Shapely 计算真实四边形 IoU，比矩形 IoU 更精确。
+
+**默认状态：** 需要自己替换 `bbox_loss`，未自动启用
 
 **安装依赖：**
 ```bash
@@ -166,7 +187,9 @@ class ArmorPoseTrainerWithPolyIoU(ArmorPoseTrainer):
         self.bbox_loss = PolyIoULoss()
 ```
 
-### 2. 大符旋转不变损失 (`loss_rune.py`)
+### 2. 大符旋转不变损失 (`loss_rune.py`) ❌ 默认关闭
+
+**使用条件：** 只有使用 `RunePoseTrainer` 时才启用，标准 `PoseTrainer` 不启用
 
 解决大符 **4 重旋转对称性** 导致的混淆问题：
 
