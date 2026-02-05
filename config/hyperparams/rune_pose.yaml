@@ -1,0 +1,53 @@
+# Rune Pose Detection Hyperparameters
+# Optimized for 8-point rune with rotation-invariant loss
+
+# Training Settings
+epochs: 100
+imgsz: 640
+batch: 16
+
+# Learning Rate
+lr0: 0.01
+lrf: 0.01
+momentum: 0.937
+weight_decay: 0.0005
+warmup_epochs: 3.0
+warmup_momentum: 0.8
+warmup_bias_lr: 0.1
+
+# Loss Gains - Very high pose weight for 8-keypoint accuracy
+box: 7.5
+cls: 0.5
+dfl: 1.5
+pose: 80.0       # Very high weight for 8-keypoint rune detection
+kobj: 1.0
+
+# Augmentation - Stronger for rune variety
+hsv_h: 0.015
+hsv_s: 0.7
+hsv_v: 0.4
+degrees: 10.0
+translate: 0.1
+scale: 0.5
+shear: 0.0
+perspective: 0.0
+flipud: 0.0      # No vertical flip for rune
+fliplr: 0.5      # Horizontal flip OK
+mosaic: 1.0
+mixup: 0.0
+copy_paste: 0.0
+
+# Training Features
+close_mosaic: 10
+amp: True
+patience: 50
+
+# Output
+project: runs/pose
+name: rune_rotation_invariant
+exist_ok: True
+
+# Validation
+val: True
+plots: True
+save: True
