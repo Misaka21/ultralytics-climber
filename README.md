@@ -133,7 +133,38 @@ cls_target *= pred_ious
 
 #### 🔹 PolyIoU Loss（可选）
 
-使用 Shapely 计算真实四边形 IoU，比矩形 IoU 更精确（需要 `pip install shapely`）
+使用 Shapely 计算真实四边形 IoU，比矩形 IoU 更精确。
+
+**安装依赖：**
+```bash
+pip install shapely
+```
+
+**使用方法：**
+```python
+from ultralytics.utils.loss_armor import PolyIoULoss
+
+# 替换默认的 bbox_loss
+loss_fn = PolyIoULoss(reduction='mean')
+
+# 输入是 4 个角点 [x1,y1,x2,y2,x3,y3,x4,y4]
+pred_corners = torch.tensor([[100, 100, 200, 100, 200, 200, 100, 200]])
+gt_corners = torch.tensor([[105, 95, 195, 105, 195, 195, 105, 205]])
+
+loss = loss_fn(pred_corners, gt_corners)
+```
+
+**在 Trainer 中启用：**
+```python
+from ultralytics.models.yolo.pose.train_armor import ArmorPoseTrainer
+
+class ArmorPoseTrainerWithPolyIoU(ArmorPoseTrainer):
+    def __init__(self, cfg, overrides=None, _callbacks=None):
+        super().__init__(cfg, overrides, _callbacks)
+        # 替换为 PolyIoU
+        from ultralytics.utils.loss_armor import PolyIoULoss
+        self.bbox_loss = PolyIoULoss()
+```
 
 ### 2. 大符旋转不变损失 (`loss_rune.py`)
 
@@ -190,6 +221,102 @@ loss = min(loss_0deg, loss_90deg, loss_180deg, loss_270deg)
 | 关键点准确率 | 62% | 94% | +52% |
 | 旋转混淆率 | 35% | 2% | -94% |
 
+## 🛠️ 如何使用这些 Trick
+
+### 1. 调整 WingLoss 参数
+
+在 `ultralytics/utils/loss_armor.py` 中：
+```python
+self.keypoint_loss = ArmorKeypointLoss(
+    sigmas=sigmas,
+    w=10.0,      # 调整这个：WingLoss 过渡点，默认 10（像素）
+    epsilon=2.0  # 调整这个：曲率参数，默认 2
+)
+```
+
+**调参建议：**
+- `w` 增大：更多样本使用对数损失（适合粗调）
+- `w` 减小：更快切换到线性（适合精调）
+- `epsilon` 减小：对数部分更陡峭（梯度更强）
+
+### 2. 控制分阶段训练切换
+
+在训练脚本中手动控制：
+```python
+from ultralytics.models.yolo.pose.train_armor import ArmorPoseTrainer
+
+trainer = ArmorPoseTrainer(overrides={...})
+
+# 在第 80 epoch 切换到 L1 精调（假设总共 200 epochs）
+# 在训练循环中检测 epoch 并调用：
+if epoch == 80:
+    trainer.criterion.enable_l1_finetuning()
+    print("切换到 L1 精调阶段")
+
+trainer.train()
+```
+
+或在 `ArmorPoseLoss` 中自动切换（已支持）：
+```python
+# 在 __call__ 方法中根据 epoch 自动切换
+if hasattr(self, 'epoch') and self.epoch > self.total_epochs * 0.4:
+    self.enable_l1_finetuning()
+```
+
+### 3. 使用旋转不变损失（大符）
+
+```python
+from ultralytics.models.yolo.pose.train_rune import RunePoseTrainer
+
+# 只需要用这个 Trainer，旋转不变自动生效
+trainer = RunePoseTrainer(overrides={
+    "model": "config/models/rune/rune-pose-mobilenet.yaml",
+    "data": "config/datasets/rune.yaml",
+    "epochs": 100,
+})
+trainer.train()
+```
+
+### 4. 调整 Sigma（约束严格程度）
+
+在 `config/hyperparams/armor_pose.yaml` 中：
+```yaml
+# 不是直接参数，需要修改代码中的 sigmas
+```
+
+或在代码中动态调整：
+```python
+# 训练过程中逐渐收紧约束（课程学习）
+for epoch in range(epochs):
+    sigma = 0.1 * (0.5 ** (epoch // 50))  # 每 50 epoch 减半
+    trainer.criterion.keypoint_loss.sigmas.fill_(sigma)
+```
+
+### 5. IoU 加权软标签开关
+
+```python
+from ultralytics.utils.loss_armor import ArmorPoseLoss
+
+# 关闭 IoU 加权（如果不稳定）
+loss_fn = ArmorPoseLoss(model, use_iou_weighted_cls=False)
+
+# 或调整权重
+loss_fn.use_iou_weighted_cls = True  # 默认开启
+```
+
+### 6. 自定义损失权重
+
+```python
+# 在训练脚本中动态调整
+overrides = {
+    "box": 7.5,    # 边界框损失
+    "pose": 12.0,  # 关键点损失 ⬆️ 提高这个让角点更准
+    "kobj": 1.0,   # 关键点可见性
+    "cls": 0.5,    # 分类损失
+    "dfl": 1.5,    # 分布焦点损失
+}
+```
+
 ## 🛠️ 自定义训练
 
 ### 修改超参数
@@ -235,6 +362,89 @@ class MyCustomLoss(ArmorPoseLoss):
 ## 📄 License
 
 AGPL-3.0 License - 详见 [LICENSE](LICENSE)
+
+## 📖 完整示例：组合使用所有 Trick
+
+```python
+#!/usr/bin/env python3
+"""高级训练示例：组合使用所有优化 Trick"""
+
+import torch
+from ultralytics.models.yolo.pose.train_armor import ArmorPoseTrainer
+
+# ========== 配置 ==========
+config = {
+    "model": "config/models/armor/armor-pose-mobilenet.yaml",
+    "data": "config/datasets/armor_plate.yaml",
+    "epochs": 200,
+    "batch": 16,
+    "imgsz": 640,
+    "device": "0",
+    
+    # 损失权重
+    "box": 7.5,
+    "pose": 15.0,      # ⬆️ 提高关键点权重
+    "kobj": 1.0,
+    "cls": 0.5,
+    "dfl": 1.5,
+    
+    # 其他参数
+    "lr0": 0.01,
+    "lrf": 0.01,
+    "patience": 50,
+    "close_mosaic": 10,
+}
+
+# ========== 创建 Trainer ==========
+trainer = ArmorPoseTrainer(overrides=config)
+
+# ========== Trick 1: 调整 WingLoss 参数 ==========
+trainer.criterion.keypoint_loss.w = 8.0        # 更早切换到线性
+trainer.criterion.keypoint_loss.epsilon = 1.5  # 更陡峭的梯度
+
+# ========== Trick 2: 启用 PolyIoU（如果安装了 shapely）==========
+try:
+    from ultralytics.utils.loss_armor import PolyIoULoss
+    trainer.criterion.bbox_loss = PolyIoULoss()
+    print("✅ PolyIoU 已启用")
+except ImportError:
+    print("⚠️ PolyIoU 需要 shapely: pip install shapely")
+
+# ========== Trick 3: 动态 Sigma 调整（课程学习）==========
+original_sigmas = trainer.criterion.keypoint_loss.sigmas.clone()
+
+def on_train_epoch_start(trainer):
+    """每轮开始时调整 sigma"""
+    epoch = trainer.epoch
+    total = trainer.epochs
+    
+    # 前 30%：宽松约束 → 后 70%：严格约束
+    if epoch < total * 0.3:
+        sigma = 0.08  # 宽松
+    else:
+        sigma = 0.04  # 严格
+    
+    trainer.criterion.keypoint_loss.sigmas.fill_(sigma)
+    
+    # Trick 4: 分阶段训练切换（40% 切换到 L1）
+    if epoch == int(total * 0.4):
+        trainer.criterion.enable_l1_finetuning()
+        print(f"\n🔄 Epoch {epoch}: 切换到 L1 精调阶段\n")
+
+# 注册回调
+trainer.add_callback("on_train_epoch_start", on_train_epoch_start)
+
+# ========== 开始训练 ==========
+print("🚀 开始训练，使用以下优化：")
+print("   - WingLoss (w=8.0, epsilon=1.5)")
+print("   - 动态 Sigma (0.08 → 0.04)")
+print("   - 分阶段训练 (40% 切换 L1)")
+print("   - IoU 加权软标签\n")
+
+trainer.train()
+
+print(f"\n✅ 训练完成！模型保存至: {trainer.save_dir}")
+```
 
 ---
 
