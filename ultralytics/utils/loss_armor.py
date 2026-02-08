@@ -231,7 +231,11 @@ class ArmorPoseLoss(v8PoseLoss):
             mask_gt,
         )
 
-        # TUP-style IoU-weighted soft labels
+        # Keep a stable denominator for bbox/dfl losses.
+        # IoU reweighting is applied to cls targets only.
+        target_scores_sum = target_scores.sum().clamp(min=1.0)
+
+        # TUP-style IoU-weighted soft labels for classification
         # High-quality predictions get stronger supervision signal
         if self.use_iou_weighted_cls and fg_mask.sum() > 0:
             # Calculate IoU between predictions and targets for foreground
@@ -245,13 +249,13 @@ class ArmorPoseLoss(v8PoseLoss):
             # Weight classification targets by IoU (TUP: cls_target *= pred_ious)
             target_scores_weighted = target_scores.clone()
             target_scores_weighted[fg_mask] *= ious.unsqueeze(-1)
-            target_scores_sum = max(target_scores_weighted.sum(), 1)
+            target_scores_weighted_sum = target_scores_weighted.sum().clamp(min=1.0)
         else:
             target_scores_weighted = target_scores
-            target_scores_sum = max(target_scores.sum(), 1)
+            target_scores_weighted_sum = target_scores_sum
 
         # Cls loss with IoU-weighted targets
-        loss[3] = self.bce(pred_scores, target_scores_weighted.to(dtype)).sum() / target_scores_sum  # BCE
+        loss[3] = self.bce(pred_scores, target_scores_weighted.to(dtype)).sum() / target_scores_weighted_sum  # BCE
 
         # Bbox loss
         if fg_mask.sum():

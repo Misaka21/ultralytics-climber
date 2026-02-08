@@ -1,36 +1,57 @@
-# 先启用TensorBoard (必须在导入YOLO之前)
-from ultralytics import settings
+#!/usr/bin/env python3
+"""Armor pose training entrypoint (kpt_shape=[4,2], no rune rotation invariance)."""
+
+from ultralytics import YOLO, settings
+from ultralytics.models.yolo.pose.train_armor import ArmorPoseTrainer
+
+# 先启用 TensorBoard（必须在构建模型前）
 settings.update(tensorboard=True)
 
-from ultralytics import YOLO
+# 可直接改这三个 YAML 路径
+MODEL_YAML = "config/models/armor/armor-pose-mobilenet.yaml"
+DATA_YAML = "config/datasets/armor_plate.yaml"
+HYP_YAML = "config/hyperparams/armor_pose.yaml"
 
-# 加载MobileNet检测模型配置
-model = YOLO('ultralytics/cfg/models/armor/armor-detect-mobilenet.yaml')
+
+class ArmorYOLO(YOLO):
+    """Use ArmorPoseTrainer while keeping YOLO(...).train(...) style."""
+
+    @property
+    def task_map(self):
+        mapping = super().task_map
+        mapping["pose"]["trainer"] = ArmorPoseTrainer
+        return mapping
+
+
+# 加载 armor pose 模型配置（4点角点）
+model = ArmorYOLO(MODEL_YAML)
 
 # 开始训练
 model.train(
-    data='ultralytics/cfg/datasets/armor_dataset_v4.yaml',
-    epochs=500,
-    batch=32,  # RTX 2060显存6GB，32会OOM
-    device=0,  # 使用GPU 0，多卡可用 device=[0,1]
+    data=DATA_YAML,
+    cfg=HYP_YAML,   # 读取超参数 YAML
+    epochs=300,
+    batch=32,
+    imgsz=640,
+    device=0,
     workers=8,
-    project='runs/detect',
-    name='armor_mobilenet',
+    project="runs/pose",
+    name="armor_pose_mobilenet",
     val=True,
-    patience=20,  # 早停patience
+    patience=50,
     save=True,
     plots=True,
-    # 数据增强
-    fliplr=0.0,  # 禁用水平翻转
-    flipud=0.0,  # 禁用垂直翻转
-    mosaic=0.5,      # mosaic增强概率
-    mixup=0.0,       # mixup增强概率
-    hsv_h=0.015,     # 色调变化
-    hsv_s=0.7,       # 饱和度变化
-    hsv_v=0.4,       # 亮度变化
-    degrees=30,     # 旋转角度
-    translate=0.5,   # 平移
-    scale=0.5,       # 缩放
-
-
+    # 这些参数会覆盖 HYP_YAML 中同名项
+    fliplr=0.5,     # 对应 armor_plate.yaml 里的 flip_idx: [1, 0, 3, 2]
+    flipud=0.0,
+    mosaic=0.2,
+    mixup=0.0,
+    hsv_h=0.015,
+    hsv_s=0.7,
+    hsv_v=0.4,
+    degrees=10.0,
+    translate=0.1,
+    scale=0.3,
+    shear=0.0,
+    perspective=0.0,
 )
