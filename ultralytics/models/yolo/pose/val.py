@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from ultralytics.models.yolo.detect import DetectionValidator
-from ultralytics.utils import ops
+from ultralytics.utils import LOGGER, ops
 from ultralytics.utils.metrics import OKS_SIGMA, PoseMetrics, kpt_iou
 
 
@@ -103,6 +103,20 @@ class PoseValidator(DetectionValidator):
         is_pose = self.kpt_shape == [17, 3]
         nkpt = self.kpt_shape[0]
         self.sigma = OKS_SIGMA if is_pose else np.ones(nkpt) / nkpt
+        ignore_pose_classes = self.data.get("pose_ignore_classes", [])
+        if isinstance(ignore_pose_classes, (int, float, str)):
+            ignore_pose_classes = [ignore_pose_classes]
+        ignore_pose_classes = {int(c) for c in ignore_pose_classes}
+        valid_ignore = {c for c in ignore_pose_classes if 0 <= c < len(self.names)}
+        invalid_ignore = sorted(ignore_pose_classes - valid_ignore)
+        if invalid_ignore:
+            LOGGER.warning(
+                f"Invalid `pose_ignore_classes={invalid_ignore}` in dataset yaml, valid range is [0, {len(self.names) - 1}]."
+            )
+        self.metrics.pose_ignore_classes = valid_ignore
+        if valid_ignore:
+            ignored = ", ".join(f"{c}:{self.names[c]}" for c in sorted(valid_ignore))
+            LOGGER.info(f"Pose metrics will ignore classes: {ignored}")
 
     def postprocess(self, preds: torch.Tensor) -> dict[str, torch.Tensor]:
         """Postprocess YOLO predictions to extract and reshape keypoints for pose estimation.

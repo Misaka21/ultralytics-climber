@@ -1,54 +1,67 @@
 # Ultralytics AGPL-3.0 License - https://ultralytics.com/license
-"""Rotation-invariant loss functions for rune keypoint detection.
-
-This module implements cyclic rotation matching loss for 4-fold symmetric rune targets:
-- CyclicRotationKeypointLoss: Computes min loss across 4 rotations for 8 keypoints
-- RunePoseLoss: Pose loss with rotation invariance for rune_targeting class
-
-The rune has 4-fold central symmetry with 8 keypoints arranged in 4 pairs.
-Due to this symmetry, the network may confuse the rotational order (0/90/180/270 degrees).
-This loss function handles the ambiguity by computing loss for all 4 rotations and taking the minimum.
-"""
+"""Rotation-invariant loss functions for rune keypoint detection."""
 
 from __future__ import annotations
+
+import math
+from typing import Any
 
 import torch
 import torch.nn as nn
 
 from ultralytics.utils.loss import v8PoseLoss
+from ultralytics.utils.metrics import bbox_iou
+from ultralytics.utils.ops import xyxy2xywh
+from ultralytics.utils.tal import make_anchors
 
 
 class CyclicRotationKeypointLoss(nn.Module):
-    """Keypoint loss with 4-fold cyclic rotation invariance for rune detection.
+    """Rotation-invariant keypoint loss with staged Wing -> L1 fine-tuning."""
 
-    For 8 keypoints arranged in 4 pairs (rune_targeting class):
-    - Computes loss for all 4 cyclic rotations (0, 90, 180, 270 degrees)
-    - Takes minimum loss as the final result
-    - Maintains intra-group order (left point stays left of right point)
-    - Maintains inter-group order (counterclockwise sequence preserved)
+    ROTATIONS = (
+        (0, 1, 2, 3, 4, 5, 6, 7),  # 0 deg
+        (2, 3, 4, 5, 6, 7, 0, 1),  # 90 deg
+        (4, 5, 6, 7, 0, 1, 2, 3),  # 180 deg
+        (6, 7, 0, 1, 2, 3, 4, 5),  # 270 deg
+    )
 
-    4 cyclic rotation index permutations:
-    - rot0 (0 deg):   [0,1,2,3,4,5,6,7]  # original
-    - rot1 (90 deg):  [2,3,4,5,6,7,0,1]  # shift by 2 positions
-    - rot2 (180 deg): [4,5,6,7,0,1,2,3]  # shift by 4 positions
-    - rot3 (270 deg): [6,7,0,1,2,3,4,5]  # shift by 6 positions
-    """
-
-    ROTATIONS = [
-        [0, 1, 2, 3, 4, 5, 6, 7],  # 0 deg - original
-        [2, 3, 4, 5, 6, 7, 0, 1],  # 90 deg - shift by 2
-        [4, 5, 6, 7, 0, 1, 2, 3],  # 180 deg - shift by 4
-        [6, 7, 0, 1, 2, 3, 4, 5],  # 270 deg - shift by 6
-    ]
-
-    def __init__(self, sigmas: torch.Tensor):
-        """Initialize CyclicRotationKeypointLoss.
-
-        Args:
-            sigmas (torch.Tensor): Sigma values for each keypoint (length 8).
-        """
+    def __init__(self, sigmas: torch.Tensor, w: float = 10.0, epsilon: float = 2.0):
         super().__init__()
         self.sigmas = sigmas
+        self.w = w
+        self.epsilon = epsilon
+        self.C = self.w - self.w * math.log(1 + self.w / self.epsilon)
+        self.use_l1 = False
+
+    def wing_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        diff = torch.abs(pred - target)
+        return torch.where(
+            diff < self.w,
+            self.w * torch.log1p(diff / self.epsilon),
+            diff - self.C,
+        )
+
+    def _compute_component_loss(
+        self,
+        pred_kpts: torch.Tensor,
+        gt_kpts: torch.Tensor,
+        kpt_mask: torch.Tensor,
+        area: torch.Tensor,
+    ) -> torch.Tensor:
+        mask = kpt_mask.float()
+        d = (pred_kpts[..., 0] - gt_kpts[..., 0]).pow(2) + (pred_kpts[..., 1] - gt_kpts[..., 1]).pow(2)
+        e = d / ((2 * self.sigmas.to(d.device)).pow(2) * (area + 1e-9) * 2)
+        oks_loss = (1 - torch.exp(-e)) * mask
+
+        area_scale = torch.sqrt(area + 1e-9)
+        if self.use_l1:
+            l1_loss = (torch.abs(pred_kpts[..., 0] - gt_kpts[..., 0]) + torch.abs(pred_kpts[..., 1] - gt_kpts[..., 1])) * mask
+            reg_loss = l1_loss / area_scale
+        else:
+            wing = (self.wing_loss(pred_kpts[..., 0], gt_kpts[..., 0]) + self.wing_loss(pred_kpts[..., 1], gt_kpts[..., 1])) * mask
+            reg_loss = wing / area_scale
+
+        return 0.3 * oks_loss + 0.7 * reg_loss
 
     def forward(
         self,
@@ -57,125 +70,188 @@ class CyclicRotationKeypointLoss(nn.Module):
         kpt_mask: torch.Tensor,
         area: torch.Tensor,
     ) -> torch.Tensor:
-        """Compute rotation-invariant keypoint loss.
-
-        For samples with all 8 keypoints visible (rune_targeting), computes loss
-        for all 4 rotations and takes the minimum. For other samples, uses standard loss.
-
-        Args:
-            pred_kpts (torch.Tensor): Predicted keypoints, shape (N, 8, 2 or 3).
-            gt_kpts (torch.Tensor): Ground truth keypoints, shape (N, 8, 2 or 3).
-            kpt_mask (torch.Tensor): Visibility mask, shape (N, 8).
-            area (torch.Tensor): Bounding box area, shape (N, 1).
-
-        Returns:
-            (torch.Tensor): Scalar loss value.
-        """
-        n_samples = pred_kpts.shape[0]
+        n_samples, nkpt = pred_kpts.shape[:2]
         if n_samples == 0:
             return torch.tensor(0.0, device=pred_kpts.device)
 
-        # Check which samples have all 8 keypoints visible (rune_targeting)
-        visible_count = kpt_mask.sum(dim=1)
-        full_visible_mask = visible_count == 8  # Only apply rotation invariance to these
+        visible_count = (kpt_mask > 0).sum(dim=1)
+        full_visible_mask = visible_count == nkpt
+        all_losses = torch.zeros(n_samples, nkpt, device=pred_kpts.device)
 
-        # Initialize per-sample loss tensor
-        all_losses = torch.zeros(n_samples, pred_kpts.shape[1], device=pred_kpts.device)
-
-        # Process samples with all 8 keypoints visible (rotation-invariant)
         if full_visible_mask.any():
             pred_full = pred_kpts[full_visible_mask]
             gt_full = gt_kpts[full_visible_mask]
             mask_full = kpt_mask[full_visible_mask]
             area_full = area[full_visible_mask]
 
-            # Compute loss for all 4 rotations
             rotation_losses = []
             for rot_idx in self.ROTATIONS:
-                # Reorder ground truth keypoints according to rotation
                 gt_rotated = gt_full[:, rot_idx, :]
                 mask_rotated = mask_full[:, rot_idx]
-                loss = self._compute_oks_loss_per_sample(pred_full, gt_rotated, mask_rotated, area_full)
-                rotation_losses.append(loss)
+                rotation_losses.append(self._compute_component_loss(pred_full, gt_rotated, mask_rotated, area_full))
 
-            # Stack losses: (4, N_full, 8)
-            stacked_losses = torch.stack(rotation_losses, dim=0)
+            stacked_losses = torch.stack(rotation_losses, dim=0)  # (4, n_full, nkpt)
+            best_rot_idx = stacked_losses.sum(dim=2).argmin(dim=0)
+            batch_idx = torch.arange(pred_full.shape[0], device=pred_kpts.device)
+            all_losses[full_visible_mask] = stacked_losses[best_rot_idx, batch_idx, :]
 
-            # Sum across keypoints to get total loss per rotation per sample: (4, N_full)
-            loss_per_rotation = stacked_losses.sum(dim=2)
-
-            # Find the best rotation for each sample (minimum total loss)
-            best_rot_idx = loss_per_rotation.argmin(dim=0)  # (N_full,)
-
-            # Gather the per-keypoint losses from the best rotation for each sample
-            n_full = pred_full.shape[0]
-            batch_idx = torch.arange(n_full, device=pred_full.device)
-            best_losses = stacked_losses[best_rot_idx, batch_idx, :]  # (N_full, 8)
-
-            all_losses[full_visible_mask] = best_losses
-
-        # Process samples with partial visibility (standard loss, no rotation invariance)
         partial_mask = ~full_visible_mask
         if partial_mask.any():
-            pred_partial = pred_kpts[partial_mask]
-            gt_partial = gt_kpts[partial_mask]
-            mask_partial = kpt_mask[partial_mask]
-            area_partial = area[partial_mask]
+            all_losses[partial_mask] = self._compute_component_loss(
+                pred_kpts[partial_mask],
+                gt_kpts[partial_mask],
+                kpt_mask[partial_mask],
+                area[partial_mask],
+            )
 
-            partial_loss = self._compute_oks_loss_per_sample(pred_partial, gt_partial, mask_partial, area_partial)
-            all_losses[partial_mask] = partial_loss
-
-        # Apply kpt_loss_factor and kpt_mask, then take mean (matching original KeypointLoss)
-        kpt_loss_factor = kpt_mask.shape[1] / (kpt_mask.sum(dim=1, keepdim=True) + 1e-9)
-        return (kpt_loss_factor * all_losses * kpt_mask).mean()
-
-    def _compute_oks_loss_per_sample(
-        self,
-        pred_kpts: torch.Tensor,
-        gt_kpts: torch.Tensor,
-        kpt_mask: torch.Tensor,
-        area: torch.Tensor,
-    ) -> torch.Tensor:
-        """Compute OKS-based keypoint loss per sample per keypoint.
-
-        Args:
-            pred_kpts (torch.Tensor): Predicted keypoints, shape (N, 8, 2 or 3).
-            gt_kpts (torch.Tensor): Ground truth keypoints, shape (N, 8, 2 or 3).
-            kpt_mask (torch.Tensor): Visibility mask, shape (N, 8).
-            area (torch.Tensor): Bounding box area, shape (N, 1).
-
-        Returns:
-            (torch.Tensor): Per-sample per-keypoint loss, shape (N, 8).
-        """
-        # Euclidean distance squared
-        d = (pred_kpts[..., 0] - gt_kpts[..., 0]).pow(2) + (pred_kpts[..., 1] - gt_kpts[..., 1]).pow(2)
-
-        # OKS-based loss
-        sigmas = self.sigmas.to(d.device)
-        e = d / ((2 * sigmas).pow(2) * (area + 1e-9) * 2)
-        oks_loss = 1 - torch.exp(-e)
-
-        return oks_loss
+        kpt_loss_factor = nkpt / ((kpt_mask > 0).sum(dim=1, keepdim=True) + 1e-9)
+        return (kpt_loss_factor * all_losses).mean()
 
 
 class RunePoseLoss(v8PoseLoss):
-    """Pose loss for rune detection with rotation invariance.
+    """Rune pose loss with rotation-invariant keypoint matching and TUP-style tricks."""
 
-    This loss extends v8PoseLoss to use CyclicRotationKeypointLoss for handling
-    the 4-fold symmetry of rune targets. Only the keypoint_loss is replaced;
-    all other processing remains unchanged from the parent class.
-    """
-
-    def __init__(self, model):
-        """Initialize RunePoseLoss with rotation-invariant keypoint loss.
-
-        Args:
-            model: The model to compute loss for (must be de-paralleled).
-        """
+    def __init__(self, model, use_iou_weighted_cls: bool = True):
         super().__init__(model)
-
-        # Override keypoint_loss with rotation-invariant version
-        # Use the same sigmas as the original v8PoseLoss (1/nkpt for non-COCO)
-        nkpt = self.kpt_shape[0]  # Should be 8 for rune
-        sigmas = torch.ones(nkpt, device=self.device) / nkpt  # 1/8 = 0.125, matching original
+        nkpt = self.kpt_shape[0]
+        sigmas = torch.ones(nkpt, device=self.device) / nkpt
         self.keypoint_loss = CyclicRotationKeypointLoss(sigmas=sigmas)
+        self.bce_pose = nn.BCEWithLogitsLoss()
+        self.use_iou_weighted_cls = use_iou_weighted_cls
+        ignore = getattr(model, "pose_ignore_classes", set()) or set()
+        self.pose_ignore_classes = {int(c) for c in ignore}
+
+    def enable_l1_finetuning(self):
+        if hasattr(self.keypoint_loss, "use_l1"):
+            self.keypoint_loss.use_l1 = True
+
+    def disable_l1_finetuning(self):
+        if hasattr(self.keypoint_loss, "use_l1"):
+            self.keypoint_loss.use_l1 = False
+
+    def __call__(self, preds: Any, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        loss = torch.zeros(5, device=self.device)  # box, cls, dfl, kpt_location, kpt_visibility
+        feats, pred_kpts = preds if isinstance(preds[0], list) else preds[1]
+        pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
+            (self.reg_max * 4, self.nc), 1
+        )
+
+        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        pred_distri = pred_distri.permute(0, 2, 1).contiguous()
+        pred_kpts = pred_kpts.permute(0, 2, 1).contiguous()
+
+        dtype = pred_scores.dtype
+        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]
+        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+
+        batch_size = pred_scores.shape[0]
+        batch_idx = batch["batch_idx"].view(-1, 1)
+        targets = torch.cat((batch_idx, batch["cls"].view(-1, 1), batch["bboxes"]), 1)
+        targets = self.preprocess(targets, batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+        gt_labels, gt_bboxes = targets.split((1, 4), 2)
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+
+        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)
+        pred_kpts = self.kpts_decode(anchor_points, pred_kpts.view(batch_size, -1, *self.kpt_shape))
+
+        _, target_bboxes, target_scores, fg_mask, target_gt_idx = self.assigner(
+            pred_scores.detach().sigmoid(),
+            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+            anchor_points * stride_tensor,
+            gt_labels,
+            gt_bboxes,
+            mask_gt,
+        )
+
+        target_scores_sum = target_scores.sum().clamp(min=1.0)
+        target_scores_for_cls = target_scores
+        target_scores_for_cls_sum = target_scores_sum
+
+        if self.use_iou_weighted_cls and fg_mask.sum() > 0:
+            pred_bboxes_scaled = pred_bboxes * stride_tensor
+            ious = bbox_iou(
+                pred_bboxes_scaled[fg_mask],
+                target_bboxes[fg_mask],
+                xywh=False,
+                CIoU=False,
+            ).squeeze(-1).clamp_(0)
+            target_scores_for_cls = target_scores.clone()
+            target_scores_for_cls[fg_mask] *= ious.unsqueeze(-1)
+            target_scores_for_cls_sum = target_scores_for_cls.sum().clamp(min=1.0)
+
+        loss[3] = self.bce(pred_scores, target_scores_for_cls.to(dtype)).sum() / target_scores_for_cls_sum
+
+        if fg_mask.sum():
+            target_bboxes /= stride_tensor
+            loss[0], loss[4] = self.bbox_loss(
+                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
+            )
+            keypoints = batch["keypoints"].to(self.device).float().clone()
+            keypoints[..., 0] *= imgsz[1]
+            keypoints[..., 1] *= imgsz[0]
+            loss[1], loss[2] = self.calculate_keypoints_loss(
+                fg_mask,
+                target_gt_idx,
+                keypoints,
+                batch_idx,
+                stride_tensor,
+                target_bboxes,
+                pred_kpts,
+                gt_labels,
+            )
+
+        loss[0] *= self.hyp.box
+        loss[1] *= self.hyp.pose
+        loss[2] *= self.hyp.kobj
+        loss[3] *= self.hyp.cls
+        loss[4] *= self.hyp.dfl
+
+        return loss * batch_size, loss.detach()
+
+    def calculate_keypoints_loss(
+        self,
+        masks: torch.Tensor,
+        target_gt_idx: torch.Tensor,
+        keypoints: torch.Tensor,
+        batch_idx: torch.Tensor,
+        stride_tensor: torch.Tensor,
+        target_bboxes: torch.Tensor,
+        pred_kpts: torch.Tensor,
+        gt_labels: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Calculate keypoint losses while ignoring classes without keypoint supervision."""
+        batch_idx = batch_idx.flatten()
+        batch_size = len(masks)
+        max_kpts = torch.unique(batch_idx, return_counts=True)[1].max()
+
+        batched_keypoints = torch.zeros(
+            (batch_size, max_kpts, keypoints.shape[1], keypoints.shape[2]), device=keypoints.device
+        )
+        for i in range(batch_size):
+            keypoints_i = keypoints[batch_idx == i]
+            batched_keypoints[i, : keypoints_i.shape[0]] = keypoints_i
+
+        target_gt_idx_expanded = target_gt_idx.unsqueeze(-1).unsqueeze(-1)
+        selected_keypoints = batched_keypoints.gather(
+            1, target_gt_idx_expanded.expand(-1, -1, keypoints.shape[1], keypoints.shape[2])
+        )
+        selected_keypoints[..., :2] /= stride_tensor.view(1, -1, 1, 1)
+
+        selected_labels = gt_labels.squeeze(-1).long().gather(1, target_gt_idx)
+        pose_masks = masks
+        if self.pose_ignore_classes:
+            ignore = torch.tensor(sorted(self.pose_ignore_classes), device=selected_labels.device, dtype=selected_labels.dtype)
+            pose_masks = masks & (~torch.isin(selected_labels, ignore))
+
+        kpts_loss = torch.tensor(0.0, device=keypoints.device)
+        kpts_obj_loss = torch.tensor(0.0, device=keypoints.device)
+        if pose_masks.any():
+            gt_kpt = selected_keypoints[pose_masks]
+            area = xyxy2xywh(target_bboxes[pose_masks])[:, 2:].prod(1, keepdim=True)
+            pred_kpt = pred_kpts[pose_masks]
+            kpt_mask = gt_kpt[..., 2] != 0 if gt_kpt.shape[-1] == 3 else torch.full_like(gt_kpt[..., 0], True)
+            kpts_loss = self.keypoint_loss(pred_kpt, gt_kpt, kpt_mask, area)
+            if pred_kpt.shape[-1] == 3:
+                kpts_obj_loss = self.bce_pose(pred_kpt[..., 2], kpt_mask.float())
+
+        return kpts_loss, kpts_obj_loss

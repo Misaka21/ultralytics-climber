@@ -96,6 +96,40 @@ class RunePoseTrainer(PoseTrainer):
                 overrides[key] = value
 
         super().__init__(cfg, overrides, _callbacks)
+        self._l1_enabled = False
+        self.add_callback("on_train_epoch_start", self._staged_training_callback)
+
+    def _staged_training_callback(self, trainer):
+        """Switch Rune keypoint loss from Wing to L1 after 40% epochs."""
+        if self._l1_enabled:
+            return
+
+        staged_epoch = int(self.epochs * 0.4)
+        if self.epoch >= staged_epoch:
+            try:
+                from ultralytics.utils.torch_utils import unwrap_model
+
+                unwrapped = unwrap_model(trainer.model)
+                if hasattr(unwrapped, "criterion") and hasattr(unwrapped.criterion, "enable_l1_finetuning"):
+                    unwrapped.criterion.enable_l1_finetuning()
+                    self._l1_enabled = True
+                    LOGGER.info(
+                        f"Rune staged training: switching WingLoss -> L1 at epoch {self.epoch} "
+                        f"(40%={staged_epoch})"
+                    )
+            except Exception as e:
+                LOGGER.warning(f"Could not enable rune L1 fine-tuning: {e}")
+
+    def set_model_attributes(self):
+        """Set model attributes and pass pose-ignore classes to criterion initialization."""
+        super().set_model_attributes()
+        ignore_pose_classes = self.data.get("pose_ignore_classes", [])
+        if isinstance(ignore_pose_classes, (int, float, str)):
+            ignore_pose_classes = [ignore_pose_classes]
+        self.model.pose_ignore_classes = {int(c) for c in ignore_pose_classes}
+        if self.model.pose_ignore_classes:
+            ignored = ", ".join(f"{c}:{self.data['names'][c]}" for c in sorted(self.model.pose_ignore_classes))
+            LOGGER.info(f"Rune pose training will ignore keypoint gradients for classes: {ignored}")
 
     def get_model(
         self,

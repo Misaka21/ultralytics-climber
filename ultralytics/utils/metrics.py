@@ -1345,6 +1345,11 @@ class PoseMetrics(DetMetrics):
         self.pose = Metric()
         self.task = "pose"
         self.stats["tp_p"] = []  # add additional stats for pose
+        self.pose_ignore_classes: set[int] = set()
+
+    def _pose_class_to_index(self) -> dict[int, int]:
+        """Map class id to row index in pose metric arrays."""
+        return {int(c): i for i, c in enumerate(self.pose.ap_class_index)}
 
     def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
         """Process the detection and pose metrics over the given set of predictions.
@@ -1358,17 +1363,38 @@ class PoseMetrics(DetMetrics):
             (dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
         """
         stats = DetMetrics.process(self, save_dir, plot, on_plot=on_plot)  # process box stats
-        results_pose = ap_per_class(
-            stats["tp_p"],
-            stats["conf"],
-            stats["pred_cls"],
-            stats["target_cls"],
-            plot=plot,
-            on_plot=on_plot,
-            save_dir=save_dir,
-            names=self.names,
-            prefix="Pose",
-        )[2:]
+        target_cls_pose = stats["target_cls"]
+        if self.pose_ignore_classes:
+            ignore = np.array(sorted(self.pose_ignore_classes), dtype=target_cls_pose.dtype)
+            target_cls_pose = target_cls_pose[~np.isin(target_cls_pose, ignore)]
+
+        if target_cls_pose.size == 0:
+            # No pose-supervised classes left after filtering; keep pose metrics as 0.
+            empty_results = (
+                np.array([]),              # p
+                np.array([]),              # r
+                np.array([]),              # f1
+                np.zeros((0, 10)),         # all_ap
+                np.array([], dtype=int),   # ap_class_index
+                np.zeros((0, 1000)),       # p_curve
+                np.zeros((0, 1000)),       # r_curve
+                np.zeros((0, 1000)),       # f1_curve
+                np.linspace(0, 1, 1000),   # px
+                np.zeros((1, 1000)),       # prec_values
+            )
+            results_pose = empty_results
+        else:
+            results_pose = ap_per_class(
+                stats["tp_p"],
+                stats["conf"],
+                stats["pred_cls"],
+                target_cls_pose,
+                plot=plot,
+                on_plot=on_plot,
+                save_dir=save_dir,
+                names=self.names,
+                prefix="Pose",
+            )[2:]
         self.pose.nc = len(self.names)
         self.pose.update(results_pose)
         return stats
@@ -1390,12 +1416,29 @@ class PoseMetrics(DetMetrics):
 
     def class_result(self, i: int) -> list[float]:
         """Return the class-wise detection results for a specific class i."""
-        return DetMetrics.class_result(self, i) + self.pose.class_result(i)
+        box_result = DetMetrics.class_result(self, i)
+        pose_result = (0.0, 0.0, 0.0, 0.0)
+        if i < len(self.ap_class_index):
+            class_id = int(self.ap_class_index[i])
+            pose_i = self._pose_class_to_index().get(class_id)
+            if pose_i is not None and pose_i < len(self.pose.p):
+                pose_result = self.pose.class_result(pose_i)
+        return [*box_result, *pose_result]
 
     @property
     def maps(self) -> np.ndarray:
         """Return the mean average precision (mAP) per class for both box and pose detections."""
-        return DetMetrics.maps.fget(self) + self.pose.maps
+        box_maps = DetMetrics.maps.fget(self)
+        pose_maps = np.zeros(len(self.names), dtype=np.float64)
+        if len(self.pose.ap):
+            for pose_i, class_id in enumerate(self.pose.ap_class_index):
+                class_id = int(class_id)
+                if 0 <= class_id < len(pose_maps):
+                    pose_maps[class_id] = self.pose.ap[pose_i]
+        for class_id in self.pose_ignore_classes:
+            if 0 <= class_id < len(pose_maps):
+                pose_maps[class_id] = 0.0
+        return box_maps + pose_maps
 
     @property
     def fitness(self) -> float:
@@ -1439,14 +1482,21 @@ class PoseMetrics(DetMetrics):
             >>> pose_summary = results.summary(decimals=4)
             >>> print(pose_summary)
         """
-        per_class = {
-            "Pose-P": self.pose.p,
-            "Pose-R": self.pose.r,
-            "Pose-F1": self.pose.f1,
-        }
         summary = DetMetrics.summary(self, normalize, decimals)  # get box summary
+        pose_class_to_index = self._pose_class_to_index()
         for i, s in enumerate(summary):
-            s.update({**{k: round(v[i], decimals) for k, v in per_class.items()}})
+            class_id = int(self.ap_class_index[i])
+            pose_i = pose_class_to_index.get(class_id)
+            if pose_i is None:
+                s.update({"Pose-P": 0.0, "Pose-R": 0.0, "Pose-F1": 0.0})
+            else:
+                s.update(
+                    {
+                        "Pose-P": round(float(self.pose.p[pose_i]), decimals),
+                        "Pose-R": round(float(self.pose.r[pose_i]), decimals),
+                        "Pose-F1": round(float(self.pose.f1[pose_i]), decimals),
+                    }
+                )
         return summary
 
 
