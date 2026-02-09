@@ -41,20 +41,22 @@ def main():
         patience=50,
         save=True,
         plots=True,
+        optimizer="SGD",  # 固定优化器，按下面 lr0/momentum 训练
         # 覆盖 HYP_YAML 同名项（稳健版）
         flipud=0.0,
         fliplr=0.0,  # 避免破坏左右顺序约束
-        mosaic=0.2,
+        mosaic=0.1,
+        close_mosaic=200,
         mixup=0.0,
         copy_paste=0.0,
         hsv_h=0.015,
         hsv_s=0.1,
         hsv_v=0.4,
-        degrees=10.0,
-        translate=0.1,
-        scale=0.5,
+        degrees=5.0,
+        translate=0.05,
+        scale=0.3,
         shear=0.0,
-        perspective=0.001,
+        perspective=0.0,
     )
 
 

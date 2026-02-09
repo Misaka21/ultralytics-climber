@@ -67,6 +67,8 @@ class PoseValidator(DetectionValidator):
         super().__init__(dataloader, save_dir, args, _callbacks)
         self.sigma = None
         self.kpt_shape = None
+        self.pose_cyclic_classes: set[int] = set()
+        self.pose_cyclic_permutations: tuple[tuple[int, ...], ...] = ()
         self.args.task = "pose"
         self.metrics = PoseMetrics()
 
@@ -103,6 +105,29 @@ class PoseValidator(DetectionValidator):
         is_pose = self.kpt_shape == [17, 3]
         nkpt = self.kpt_shape[0]
         self.sigma = OKS_SIGMA if is_pose else np.ones(nkpt) / nkpt
+        cyclic_classes = self.data.get("pose_cyclic_classes", [])
+        if isinstance(cyclic_classes, (int, float, str)):
+            cyclic_classes = [cyclic_classes]
+        cyclic_classes = {int(c) for c in cyclic_classes}
+        valid_cyclic = {c for c in cyclic_classes if 0 <= c < len(self.names)}
+        invalid_cyclic = sorted(cyclic_classes - valid_cyclic)
+        if invalid_cyclic:
+            LOGGER.warning(
+                f"Invalid `pose_cyclic_classes={invalid_cyclic}` in dataset yaml, valid range is [0, {len(self.names) - 1}]."
+            )
+        if valid_cyclic and nkpt != 8:
+            LOGGER.warning("`pose_cyclic_classes` is only enabled for 8-keypoint datasets. Ignoring this option.")
+            valid_cyclic = set()
+        self.pose_cyclic_classes = valid_cyclic
+        if self.pose_cyclic_classes:
+            self.pose_cyclic_permutations = (
+                (0, 1, 2, 3, 4, 5, 6, 7),
+                (2, 3, 4, 5, 6, 7, 0, 1),
+                (4, 5, 6, 7, 0, 1, 2, 3),
+                (6, 7, 0, 1, 2, 3, 4, 5),
+            )
+            cyclic_names = ", ".join(f"{c}:{self.names[c]}" for c in sorted(self.pose_cyclic_classes))
+            LOGGER.info(f"Pose metrics use cyclic-rotation-invariant OKS for classes: {cyclic_names}")
         ignore_pose_classes = self.data.get("pose_ignore_classes", [])
         if isinstance(ignore_pose_classes, (int, float, str)):
             ignore_pose_classes = [ignore_pose_classes]
@@ -195,6 +220,22 @@ class PoseValidator(DetectionValidator):
             # `0.53` is from https://github.com/jin-s13/xtcocoapi/blob/master/xtcocotools/cocoeval.py#L384
             area = ops.xyxy2xywh(batch["bboxes"])[:, 2:].prod(1) * 0.53
             iou = kpt_iou(batch["keypoints"], preds["keypoints"], sigma=self.sigma, area=area)
+            if self.pose_cyclic_classes:
+                gt_cls_int = gt_cls.to(torch.int64)
+                cyclic_classes_tensor = torch.tensor(
+                    sorted(self.pose_cyclic_classes), device=gt_cls_int.device, dtype=gt_cls_int.dtype
+                )
+                cyclic_mask = torch.isin(gt_cls_int, cyclic_classes_tensor)
+                if cyclic_mask.any():
+                    iou = iou.clone()
+                    gt_kpts_cyclic = batch["keypoints"][cyclic_mask]
+                    area_cyclic = area[cyclic_mask]
+                    best_iou = iou[cyclic_mask]
+                    for perm in self.pose_cyclic_permutations[1:]:
+                        rotated_kpts = gt_kpts_cyclic[:, perm, :]
+                        rotated_iou = kpt_iou(rotated_kpts, preds["keypoints"], sigma=self.sigma, area=area_cyclic)
+                        best_iou = torch.maximum(best_iou, rotated_iou)
+                    iou[cyclic_mask] = best_iou
             tp_p = self.match_predictions(preds["cls"], gt_cls, iou).cpu().numpy()
         tp.update({"tp_p": tp_p})  # update tp with kpts IoU
         return tp
