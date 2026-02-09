@@ -1,68 +1,68 @@
 # 大符关键点（Rune Pose）超参数
 # 适用：kpt_shape=[8,3] + 旋转不变损失（RunePoseTrainer）
-# 说明：若训练脚本传入同名参数，会覆盖本文件配置。
+# 说明：若训练脚本 model.train(...) 传入同名参数，会覆盖本文件配置。
 
 # --------------------------
 # 训练规模
 # --------------------------
-epochs: 100          # 总训练轮数；复杂场景可提高到 200+
-imgsz: 640           # 输入分辨率；更大分辨率可提升小目标点精度
-batch: 16            # 批大小；显存不足优先降低该值
+epochs: 300            # 总训练轮数
+imgsz: 640             # 输入分辨率
+batch: 16              # 批大小（显存不足先降这个）
 
 # --------------------------
 # 优化器与学习率策略
 # --------------------------
-lr0: 0.01            # 初始学习率
-lrf: 0.01            # 最终学习率比例
-momentum: 0.937      # SGD 动量
-weight_decay: 0.0005 # 权重衰减
-warmup_epochs: 3.0   # 学习率预热轮数
-warmup_momentum: 0.8 # 预热阶段动量
-warmup_bias_lr: 0.1  # 预热阶段 bias 学习率
+lr0: 0.01              # 初始学习率
+lrf: 0.01              # 最终学习率比例
+momentum: 0.937        # SGD 动量
+weight_decay: 0.0005   # 权重衰减
+warmup_epochs: 3.0     # 预热轮数
+warmup_momentum: 0.8   # 预热动量
+warmup_bias_lr: 0.1    # 预热 bias 学习率
 
 # --------------------------
 # 损失权重（Rune Pose）
 # --------------------------
-box: 7.5             # 边框损失权重
-cls: 0.5             # 分类损失权重
-dfl: 1.5             # DFL 损失权重
-pose: 80.0           # 关键点位置损失权重（大符建议高权重）
-kobj: 1.0            # 关键点可见性/objectness 损失权重
+box: 7.5               # 边框损失权重
+cls: 0.5               # 分类损失权重
+dfl: 1.5               # DFL 损失权重
+pose: 80.0             # 关键点位置损失权重
+kobj: 1.0              # 关键点 objectness 损失权重
 
 # --------------------------
-# 数据增强
+# 数据增强（关键点任务保守配置）
 # --------------------------
-hsv_h: 0.015         # 色相扰动幅度
-hsv_s: 0.7           # 饱和度扰动幅度
-hsv_v: 0.4           # 亮度扰动幅度
-degrees: 10.0        # 随机旋转角度
-translate: 0.1       # 平移比例
-scale: 0.5           # 缩放比例
-shear: 0.0           # 错切比例
-perspective: 0.0     # 透视扰动强度
-flipud: 0.0          # 垂直翻转概率（建议关闭）
-fliplr: 0.5          # 水平翻转概率（若顺序约束严格，建议训练脚本覆盖为 0）
-mosaic: 1.0          # Mosaic 概率
-mixup: 0.0           # MixUp 概率
-copy_paste: 0.0      # Copy-Paste 概率
+hsv_h: 0.015           # 色相扰动
+hsv_s: 0.7             # 饱和度扰动
+hsv_v: 0.4             # 亮度扰动
+degrees: 5.0           # 随机旋转角度
+translate: 0.05        # 平移比例
+scale: 0.3             # 缩放比例
+shear: 0.0             # 错切
+perspective: 0.0       # 透视扰动
+flipud: 0.0            # 垂直翻转关闭
+fliplr: 0.0            # 水平翻转关闭（避免破坏关键点左右语义）
+mosaic: 0.3            # Mosaic 概率
+mixup: 0.0             # MixUp 关闭
+copy_paste: 0.0        # Copy-Paste 关闭
 
 # --------------------------
 # 训练行为
 # --------------------------
-close_mosaic: 10     # 最后 N 轮关闭 mosaic
-amp: True            # 混合精度训练
-patience: 50         # 早停耐心值
+close_mosaic: 200       # 最后 N 轮关闭 mosaic
+amp: True              # 混合精度
+patience: 50           # 早停耐心值
 
 # --------------------------
 # 输出配置
 # --------------------------
-project: runs/pose   # 输出目录
-name: rune_rotation_invariant # 实验名
-exist_ok: True       # 同名目录存在时允许复用
+project: runs/pose
+name: rune_pose_mobilenet
+exist_ok: False
 
 # --------------------------
 # 验证与可视化
 # --------------------------
-val: True            # 每轮执行验证
-plots: True          # 生成曲线和可视化
-save: True           # 保存模型权重
+val: True
+plots: True
+save: True

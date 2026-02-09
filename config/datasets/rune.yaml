@@ -5,9 +5,9 @@
 # --------------------------
 # 数据集路径配置
 # --------------------------
-path: data/rune     # 数据集根目录（请改为本机实际路径）
-train: images       # 训练图像目录（相对 path）
-val: images         # 验证图像目录（当前与 train 相同，可后续拆分）
+path: /root/autodl-tmp/RM2026_buff     # 数据集根目录（请改为本机实际路径）
+train: autosplit_train.txt       # 训练图像目录（相对 path）
+val: autosplit_val.txt         # 验证图像目录（当前与 train 相同，可后续拆分）
 
 # --------------------------
 # 关键点定义
@@ -23,10 +23,11 @@ kpt_shape: [8, 3]   # 8 个关键点，每点 3 维：(x, y, v)
 # 类别定义
 # --------------------------
 names:
-  0: rune_inactive   # 未激活符（通常仅部分点可见）
-  1: rune_targeting  # 瞄准中符（8 点全可见的主监督类别）
-  2: rune_hit        # 已击打符（可能部分点可见）
-  3: rune_center     # 中心 R（仅框/弱关键点监督）
+  0: r_target
+  1: r_R
+  2: b_target
+  3: b_R
+
 
 # --------------------------
 # 关键点翻转映射

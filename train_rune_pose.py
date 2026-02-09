@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Rune pose training entrypoint with cyclic-rotation-invariant loss."""
 
+import subprocess
 from ultralytics import YOLO, settings
 from ultralytics.models.yolo.pose.train_rune import RunePoseTrainer
 
-# 先启用 TensorBoard（必须在构建模型前）
+# 必须在构建模型前启用
 settings.update(tensorboard=True)
 
-# 可直接改这三个 YAML 路径
 MODEL_YAML = "config/models/rune/rune-pose-mobilenet.yaml"
 DATA_YAML = "config/datasets/rune.yaml"
 HYP_YAML = "config/hyperparams/rune_pose.yaml"
@@ -23,36 +23,43 @@ class RuneYOLO(YOLO):
         return mapping
 
 
-# 加载 rune pose 模型配置（8点 + 旋转不变损失）
-model = RuneYOLO(MODEL_YAML)
+def main():
+    model = RuneYOLO(MODEL_YAML)
 
-# 开始训练
-model.train(
-    data=DATA_YAML,
-    cfg=HYP_YAML,   # 读取超参数 YAML
-    epochs=300,
-    batch=16,
-    imgsz=640,
-    device=0,
-    workers=8,
-    project="runs/pose",
-    name="rune_rotation_invariant",
-    val=True,
-    patience=50,
-    save=True,
-    plots=True,
-    # 这些参数会覆盖 HYP_YAML 中同名项
-    flipud=0.0,
-    fliplr=0.0,  # 避免破坏左右顺序约束
-    mosaic=0.5,
-    mixup=0.0,
-    copy_paste=0.0,
-    hsv_h=0.015,
-    hsv_s=0.7,
-    hsv_v=0.4,
-    degrees=10.0,
-    translate=0.1,
-    scale=0.5,
-    shear=0.0,
-    perspective=0.0,
-)
+    model.train(
+        data=DATA_YAML,
+        cfg=HYP_YAML,
+        epochs=1000,
+        batch=64,
+        imgsz=640,
+        device=0,
+        workers=8,
+        amp=False,
+        project="runs/pose",
+        name="rune_pose_mobilenet",
+        val=True,
+        patience=50,
+        save=True,
+        plots=True,
+        # 覆盖 HYP_YAML 同名项（稳健版）
+        flipud=0.0,
+        fliplr=0.0,  # 避免破坏左右顺序约束
+        mosaic=0.2,
+        mixup=0.0,
+        copy_paste=0.0,
+        hsv_h=0.015,
+        hsv_s=0.1,
+        hsv_v=0.4,
+        degrees=10.0,
+        translate=0.1,
+        scale=0.5,
+        shear=0.0,
+        perspective=0.001,
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+    # 2 分钟后关机（Linux）
+    subprocess.run(["shutdown", "-h", "+2"], check=False)

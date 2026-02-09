@@ -16,7 +16,7 @@ batch: 16 # (int) 批大小；可设 -1 启用 AutoBatch
 imgsz: 640 # (int | list) train/val 常用整数边长；predict/export 可用 [h,w]
 save: True # (bool) 是否保存训练检查点与预测结果
 save_period: -1 # (int) 每 N 轮保存一次检查点；<1 表示关闭
-cache: False # (bool | str) 是否缓存图像：True/'ram' 内存，'disk' 磁盘，False 关闭
+cache: True # (bool | str) 是否缓存图像：True/'ram' 内存，'disk' 磁盘，False 关闭
 device: # (int | str | list) 设备：如 0、[0,1]、cpu、mps、-1 自动选空闲卡
 workers: 8 # (int) DataLoader 线程数（DDP 下为每卡线程数）
 project: # (str, 可选) 输出项目根目录

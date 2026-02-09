@@ -42,7 +42,7 @@ model.train(
     save=True,
     plots=True,
     # 这些参数会覆盖 HYP_YAML 中同名项
-    fliplr=0.5,     # 对应 armor_plate.yaml 里的 flip_idx: [1, 0, 3, 2]
+    fliplr=0.0,     # 对应 armor_plate.yaml 里的 flip_idx: [1, 0, 3, 2]
     flipud=0.0,
     mosaic=0.2,
     mixup=0.0,
