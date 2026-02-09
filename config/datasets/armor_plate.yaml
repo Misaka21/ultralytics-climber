@@ -1,21 +1,26 @@
-# Armor Plate Pose Dataset Configuration
-# For detecting armor plates with 4 corner keypoints
-# See https://docs.ultralytics.com/datasets/pose for dataset format
+# 装甲板四角点（Pose）数据集配置
+# 任务类型：Pose（kpt_shape=[4,2]）
+# 说明：该配置用于装甲板四点关键点定位，不使用可见性维度（v）。
 
-# Dataset paths (modify these to your actual paths)
-path: /path/to/armor_dataset  # dataset root dir
-train: images/train  # train images (relative to 'path')
-val: images/val  # val images (relative to 'path')
-test:  # test images (optional)
+# --------------------------
+# 数据集路径配置
+# --------------------------
+path: /path/to/armor_dataset  # 数据集根目录（请修改为真实路径）
+train: images/train           # 训练集图像目录（相对 path）
+val: images/val               # 验证集图像目录（相对 path）
+test:                         # 测试集目录（可选，不填则不使用）
 
-# Keypoints configuration
-kpt_shape: [4, 2]  # 4 keypoints, 2 dimensions (x, y)
+# --------------------------
+# 关键点定义
+# --------------------------
+kpt_shape: [4, 2]             # 4 个关键点，每个点仅包含 (x,y)
 
-# Class names
+# 类别定义（单类别）
 names:
   0: armor
 
-# Keypoint names (optional, for visualization)
+# 关键点语义顺序（建议固定不变，避免训练不稳定）
+# 顺序为：左上 -> 右上 -> 右下 -> 左下
 kpt_names:
   0:
     - top_left
@@ -23,13 +28,18 @@ kpt_names:
     - bottom_right
     - bottom_left
 
-# Flip indices for data augmentation
-# When image is flipped horizontally:
-# top_left <-> top_right, bottom_left <-> bottom_right
+# 水平翻转后的关键点重排索引
+# 原始 [0,1,2,3] 水平翻转后应映射到 [1,0,3,2]
 flip_idx: [1, 0, 3, 2]
 
-# Dataset notes:
-# - Each image should have a corresponding label file
-# - Label format (per line): class_id x_center y_center width height kpt1_x kpt1_y kpt2_x kpt2_y kpt3_x kpt3_y kpt4_x kpt4_y
-# - All coordinates are normalized (0-1)
-# - Keypoints order: top_left, top_right, bottom_right, bottom_left (clockwise from top-left)
+# --------------------------
+# 标注格式说明
+# --------------------------
+# YOLO Pose（kpt_dim=2）单行格式：
+# class_id x_center y_center width height
+# kpt1_x kpt1_y kpt2_x kpt2_y kpt3_x kpt3_y kpt4_x kpt4_y
+#
+# 注意事项：
+# 1. 所有坐标均为归一化值（0~1）
+# 2. 关键点顺序必须与 kpt_names 一致
+# 3. 图像与标签文件需同名对应

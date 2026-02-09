@@ -1,25 +1,37 @@
-# Rune Pose Dataset Configuration
-# For detecting rune targets with keypoints
-# Dataset: rune_blender_opensource (Blender rendered rune data)
+# 大符（Rune）关键点数据集配置
+# 任务类型：Pose（kpt_shape=[8,3]）
+# 说明：该数据集用于 8 点大符定位，包含关键点可见性维度 v。
 
-path: data/rune  # 请修改为实际数据集路径
-train: images
-val: images
+# --------------------------
+# 数据集路径配置
+# --------------------------
+path: data/rune     # 数据集根目录（请改为本机实际路径）
+train: images       # 训练图像目录（相对 path）
+val: images         # 验证图像目录（当前与 train 相同，可后续拆分）
 
-# Keypoints configuration - use 8 keypoints (max for class 1)
-# Classes with fewer keypoints will have visibility=0 for unused ones
-# Class 0/2: 4 visible + 4 invisible keypoints
-# Class 1: 8 visible keypoints
-# Class 3: 8 invisible keypoints (center R, bbox only)
-kpt_shape: [8, 3]  # 8 keypoints, 3 dimensions (x, y, visibility)
+# --------------------------
+# 关键点定义
+# --------------------------
+kpt_shape: [8, 3]   # 8 个关键点，每点 3 维：(x, y, v)
 
-# Class names
+# 可见性 v 约定（常用）：
+# v=0: 不可见/无此点
+# v=1: 可见（也可按项目约定使用 v=2）
+# 对于无关键点类别，建议全部写 0 0 0
+
+# --------------------------
+# 类别定义
+# --------------------------
 names:
-  0: rune_inactive   # 未开的符 (4 keypoints visible)
-  1: rune_targeting  # 瞄准中的符 (8 keypoints visible)
-  2: rune_hit        # 已打的符 (4 keypoints visible)
-  3: rune_center     # 中心点 R (no keypoints, bbox only)
+  0: rune_inactive   # 未激活符（通常仅部分点可见）
+  1: rune_targeting  # 瞄准中符（8 点全可见的主监督类别）
+  2: rune_hit        # 已击打符（可能部分点可见）
+  3: rune_center     # 中心 R（仅框/弱关键点监督）
 
-# Keypoint flip indices (for horizontal flip augmentation)
-# For rune symbols, flipping may not make sense, but we keep symmetric indices
+# --------------------------
+# 关键点翻转映射
+# --------------------------
+# 若启用 fliplr，按此索引重排关键点。
+# 当前设置为恒等映射，仅在你的标注定义确实水平对称时成立。
+# 若符号有严格左右语义，建议训练时关闭 fliplr 或重定义 flip_idx。
 flip_idx: [0, 1, 2, 3, 4, 5, 6, 7]

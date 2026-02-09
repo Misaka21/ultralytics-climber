@@ -1,53 +1,68 @@
-# Armor Pose Detection Hyperparameters
-# Optimized for 4-point armor plate keypoint detection
+# 装甲板角点（Pose）超参数
+# 适用：kpt_shape=[4,2] 的四角点检测任务
+# 说明：若训练脚本中传入同名参数，会覆盖本文件配置。
 
-# Training Settings
-epochs: 200
-imgsz: 640
-batch: 16
+# --------------------------
+# 训练规模
+# --------------------------
+epochs: 200          # 总训练轮数；关键点任务通常比 detect 需要更多轮数
+imgsz: 640           # 输入分辨率；可尝试 768 提升小目标角点精度
+batch: 16            # 批大小；显存不足时先降 batch 再降 imgsz
 
-# Learning Rate
-lr0: 0.01
-lrf: 0.01
-momentum: 0.937
-weight_decay: 0.0005
-warmup_epochs: 3.0
-warmup_momentum: 0.8
-warmup_bias_lr: 0.1
+# --------------------------
+# 优化器与学习率策略
+# --------------------------
+lr0: 0.01            # 初始学习率
+lrf: 0.01            # 最终学习率比例
+momentum: 0.937      # SGD 动量
+weight_decay: 0.0005 # 权重衰减
+warmup_epochs: 3.0   # 预热轮数
+warmup_momentum: 0.8 # 预热动量
+warmup_bias_lr: 0.1  # 预热 bias 学习率
 
-# Loss Gains - Optimized for precise keypoint localization
-box: 7.5
-cls: 0.5
-dfl: 1.5
-pose: 12.0      # Higher weight for accurate 4-corner detection
-kobj: 1.0
+# --------------------------
+# 损失权重（Pose）
+# --------------------------
+box: 7.5             # 边框损失权重
+cls: 0.5             # 分类损失权重
+dfl: 1.5             # DFL 损失权重
+pose: 12.0           # 关键点位置损失权重；提高可更关注角点精度
+kobj: 1.0            # 关键点可见性/objectness 权重（kpt_dim=2 时影响较小）
 
-# Augmentation - Conservative for armor plates
-hsv_h: 0.015
-hsv_s: 0.7
-hsv_v: 0.4
-degrees: 10.0
-translate: 0.1
-scale: 0.5
-shear: 0.0
-perspective: 0.0
-flipud: 0.0      # No vertical flip
-fliplr: 0.5      # Horizontal flip OK
-mosaic: 1.0
-mixup: 0.0
-copy_paste: 0.0
+# --------------------------
+# 数据增强
+# --------------------------
+hsv_h: 0.015         # 色相扰动
+hsv_s: 0.7           # 饱和度扰动
+hsv_v: 0.4           # 亮度扰动
+degrees: 10.0        # 随机旋转角度范围
+translate: 0.1       # 平移比例
+scale: 0.5           # 缩放比例
+shear: 0.0           # 错切比例
+perspective: 0.0     # 透视扰动
+flipud: 0.0          # 垂直翻转概率（通常关闭）
+fliplr: 0.5          # 水平翻转概率（需保证 flip_idx 配置正确）
+mosaic: 1.0          # Mosaic 概率
+mixup: 0.0           # MixUp 概率
+copy_paste: 0.0      # Copy-Paste 概率
 
-# Training Features
-close_mosaic: 10
-amp: True
-patience: 50
+# --------------------------
+# 训练行为
+# --------------------------
+close_mosaic: 10     # 收尾阶段关闭 mosaic，提升收敛稳定性
+amp: True            # 开启混合精度
+patience: 50         # 早停耐心值
 
-# Output
-project: runs/pose
-name: armor_mobilenet
-exist_ok: True
+# --------------------------
+# 输出配置
+# --------------------------
+project: runs/pose   # 输出根目录
+name: armor_mobilenet # 实验名称
+exist_ok: True       # 同名目录存在时允许复用
 
-# Validation
-val: True
-plots: True
-save: True
+# --------------------------
+# 验证与可视化
+# --------------------------
+val: True            # 每轮验证
+plots: True          # 生成训练曲线图
+save: True           # 保存权重

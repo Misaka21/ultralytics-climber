@@ -1,51 +1,66 @@
-# Armor Detection Hyperparameters
-# For MobileNetV3-based armor plate detection (12 classes)
+# 装甲板检测（Detect）超参数
+# 适用：MobileNetV3 + YOLO 检测头（12 类装甲板）
+# 说明：若训练脚本中传入同名参数，会覆盖本文件配置。
 
-# Training Settings
-epochs: 150
-imgsz: 640
-batch: 32
+# --------------------------
+# 训练规模
+# --------------------------
+epochs: 150          # 总训练轮数；数据量大可提高到 200~300
+imgsz: 640           # 输入分辨率；提高可增精度但显存与延时上升
+batch: 32            # 批大小；受显存限制，OOM 时优先减小
 
-# Learning Rate
-lr0: 0.01
-lrf: 0.01
-momentum: 0.937
-weight_decay: 0.0005
-warmup_epochs: 3.0
-warmup_momentum: 0.8
-warmup_bias_lr: 0.1
+# --------------------------
+# 优化器与学习率策略
+# --------------------------
+lr0: 0.01            # 初始学习率
+lrf: 0.01            # 最终学习率比例（线性/余弦衰减终点）
+momentum: 0.937      # SGD 动量；过低收敛慢，过高易振荡
+weight_decay: 0.0005 # 权重衰减，抑制过拟合
+warmup_epochs: 3.0   # 预热轮数，防止训练初期梯度不稳定
+warmup_momentum: 0.8 # 预热阶段动量起始值
+warmup_bias_lr: 0.1  # 预热阶段 bias 学习率
 
-# Loss Gains - Standard for detection
-box: 7.5
-cls: 0.5
-dfl: 1.5
+# --------------------------
+# 损失权重（Detect）
+# --------------------------
+box: 7.5             # 边框回归损失权重
+cls: 0.5             # 分类损失权重
+dfl: 1.5             # DFL（分布回归）损失权重
 
-# Augmentation - Standard for detection
-hsv_h: 0.015
-hsv_s: 0.7
-hsv_v: 0.4
-degrees: 0.0      # No rotation for armor
-translate: 0.1
-scale: 0.5
-shear: 0.0
-perspective: 0.0
-flipud: 0.0      # No vertical flip
-fliplr: 0.5      # Horizontal flip OK
-mosaic: 1.0
-mixup: 0.0
-copy_paste: 0.0
+# --------------------------
+# 数据增强
+# --------------------------
+hsv_h: 0.015         # 色相扰动幅度
+hsv_s: 0.7           # 饱和度扰动幅度
+hsv_v: 0.4           # 亮度扰动幅度
+degrees: 0.0         # 旋转角度范围（装甲板检测通常保持 0 更稳定）
+translate: 0.1       # 平移比例
+scale: 0.5           # 缩放比例
+shear: 0.0           # 错切比例
+perspective: 0.0     # 透视变换强度
+flipud: 0.0          # 垂直翻转概率（通常关闭）
+fliplr: 0.5          # 水平翻转概率
+mosaic: 1.0          # Mosaic 概率；提高多样性但可能影响小目标细节
+mixup: 0.0           # MixUp 概率
+copy_paste: 0.0      # Copy-Paste 概率（Detect/Seg 场景更常用）
 
-# Training Features
-close_mosaic: 10
-amp: True
-patience: 50
+# --------------------------
+# 训练行为
+# --------------------------
+close_mosaic: 10     # 最后 N 轮关闭 mosaic，利于收敛
+amp: True            # 混合精度训练，提速并节省显存
+patience: 50         # 早停耐心值（连续 N 轮无提升则停止）
 
-# Output
-project: runs/detect
-name: armor_detect_mobilenet
-exist_ok: True
+# --------------------------
+# 输出配置
+# --------------------------
+project: runs/detect # 训练输出根目录
+name: armor_detect_mobilenet # 本次实验名
+exist_ok: True       # 目录存在时是否覆盖复用
 
-# Validation
-val: True
-plots: True
-save: True
+# --------------------------
+# 验证与可视化
+# --------------------------
+val: True            # 每轮执行验证
+plots: True          # 生成曲线图与可视化结果
+save: True           # 保存权重（含 best.pt / last.pt）

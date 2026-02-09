@@ -1,21 +1,24 @@
-# Car Detection Dataset Configuration (Sliced)
-# RoboMaster Car/Robot Detection - Single class
-# Images sliced from 4K (3840x2160) to 640x640 tiles
+# 车辆检测（切片数据）配置
+# 任务类型：Detect（单类别 car）
+# 数据来源：4K 图像切片到 640x640，用于提升小目标检测召回率
 
-# Dataset paths
-path: /media/nuc11/common/RM/RMCV/YOLO/data/radardataset/car_dataset_sliced
-train: images
-val: images  # Will use autosplit
+# --------------------------
+# 数据集路径配置
+# --------------------------
+path: /media/nuc11/common/RM/RMCV/YOLO/data/radardataset/car_dataset_sliced  # 数据集根目录
+train: images    # 训练图像目录（相对 path）
+val: images      # 验证图像目录（当前与 train 相同，可后续拆分）
 
-# Number of classes
-nc: 1
-
-# Class names
+# --------------------------
+# 类别配置
+# --------------------------
+nc: 1            # 类别数
 names:
-  0: car
+  0: car         # 车辆/机器人主体目标
 
-# Notes:
-# - Original images: 3840x2160 (4K)
-# - Sliced to: 640x640 tiles with 128px overlap
-# - Total tiles: ~15721
-# - Source: images000001-002499 (2499 original images)
+# --------------------------
+# 数据说明
+# --------------------------
+# 1. 原始分辨率：3840x2160（4K）
+# 2. 切片尺寸：640x640（可带重叠）
+# 3. 当前数据是切片后数据，标签需与切片图像一一对应
