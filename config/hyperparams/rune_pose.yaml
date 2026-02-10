@@ -49,7 +49,7 @@ copy_paste: 0.0        # Copy-Paste 关闭
 # --------------------------
 # 训练行为
 # --------------------------
-close_mosaic: 200       # 最后 N 轮关闭 mosaic
+close_mosaic: 150       # 最后 N 轮关闭 mosaic
 amp: True              # 混合精度
 patience: 50           # 早停耐心值
 

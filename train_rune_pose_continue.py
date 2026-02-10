@@ -24,19 +24,19 @@ class RuneYOLO(YOLO):
 
 
 def main():
-    model = RuneYOLO(MODEL_YAML)
+    model = RuneYOLO("/root/Misaka21/ultralytics-climber/runs/pose/rune_pose_mobilenet_ft/weights/last.pt")
 
     model.train(
         data=DATA_YAML,
         cfg=HYP_YAML,
-        epochs=300,                  # 微调轮数，不必再长跑
+        epochs=200,                  # 微调轮数，不必再长跑
         batch=64,
         imgsz=640,
         device=0,
         workers=8,
         amp=False,
         project="runs/pose",
-        name="rune_pose_mobilenet_300ep",
+        name="rune_pose_mobilenet_ft_continue",
         val=True,
         patience=0,
         save=True,
@@ -50,11 +50,11 @@ def main():
         # 关键点任务保守增强（提升角点稳定性）
         flipud=0.0,
         fliplr=0.0,
-        mosaic=0.15,
-        close_mosaic=100,
+        mosaic=0.3,
+        close_mosaic=150,
         mixup=0.0,
         copy_paste=0.0,
-        hsv_h=0.01,
+        hsv_h=0.05,
         hsv_s=0.12,
         hsv_v=0.25,
         degrees=5.0,
