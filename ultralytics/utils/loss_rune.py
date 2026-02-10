@@ -116,6 +116,7 @@ class RunePoseLoss(v8PoseLoss):
         nkpt = self.kpt_shape[0]
         sigmas = torch.ones(nkpt, device=self.device) / nkpt
         self.keypoint_loss = CyclicRotationKeypointLoss(sigmas=sigmas)
+        self.keypoint_loss.use_l1 = bool(getattr(model, "pose_use_l1_finetuning", False))
         self.bce_pose = nn.BCEWithLogitsLoss()
         self.use_iou_weighted_cls = use_iou_weighted_cls
         ignore = getattr(model, "pose_ignore_classes", set()) or set()

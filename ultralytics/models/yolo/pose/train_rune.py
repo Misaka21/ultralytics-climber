@@ -99,6 +99,21 @@ class RunePoseTrainer(PoseTrainer):
         self._l1_enabled = False
         self.add_callback("on_train_epoch_start", self._staged_training_callback)
 
+    @staticmethod
+    def _sync_l1_mode(model, enabled: bool) -> bool:
+        """Sync staged L1 mode flag to model and criterion (if already initialized)."""
+        from ultralytics.utils.torch_utils import unwrap_model
+
+        unwrapped = unwrap_model(model)
+        setattr(unwrapped, "pose_use_l1_finetuning", bool(enabled))
+        criterion = getattr(unwrapped, "criterion", None)
+        if criterion is not None:
+            if enabled and hasattr(criterion, "enable_l1_finetuning"):
+                criterion.enable_l1_finetuning()
+            elif (not enabled) and hasattr(criterion, "disable_l1_finetuning"):
+                criterion.disable_l1_finetuning()
+        return True
+
     def _staged_training_callback(self, trainer):
         """Switch Rune keypoint loss from Wing to L1 after 40% epochs."""
         if self._l1_enabled:
@@ -107,16 +122,15 @@ class RunePoseTrainer(PoseTrainer):
         staged_epoch = int(self.epochs * 0.4)
         if self.epoch >= staged_epoch:
             try:
-                from ultralytics.utils.torch_utils import unwrap_model
-
-                unwrapped = unwrap_model(trainer.model)
-                if hasattr(unwrapped, "criterion") and hasattr(unwrapped.criterion, "enable_l1_finetuning"):
-                    unwrapped.criterion.enable_l1_finetuning()
-                    self._l1_enabled = True
-                    LOGGER.info(
-                        f"Rune staged training: switching WingLoss -> L1 at epoch {self.epoch} "
-                        f"(40%={staged_epoch})"
-                    )
+                self._sync_l1_mode(trainer.model, enabled=True)
+                ema_model = getattr(getattr(trainer, "ema", None), "ema", None)
+                if ema_model is not None:
+                    self._sync_l1_mode(ema_model, enabled=True)
+                self._l1_enabled = True
+                LOGGER.info(
+                    f"Rune staged training: switching WingLoss -> L1 at epoch {self.epoch} "
+                    f"(40%={staged_epoch}) and syncing to EMA"
+                )
             except Exception as e:
                 LOGGER.warning(f"Could not enable rune L1 fine-tuning: {e}")
 
@@ -127,6 +141,7 @@ class RunePoseTrainer(PoseTrainer):
         if isinstance(ignore_pose_classes, (int, float, str)):
             ignore_pose_classes = [ignore_pose_classes]
         self.model.pose_ignore_classes = {int(c) for c in ignore_pose_classes}
+        self.model.pose_use_l1_finetuning = bool(self._l1_enabled)
         if self.model.pose_ignore_classes:
             ignored = ", ".join(f"{c}:{self.data['names'][c]}" for c in sorted(self.model.pose_ignore_classes))
             LOGGER.info(f"Rune pose training will ignore keypoint gradients for classes: {ignored}")
