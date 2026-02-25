@@ -76,6 +76,11 @@ from .repvgg import (
     RepVGGStage,
     RepVGGStem,
 )
+from .shufflenet import (
+    ShuffleV2Block,
+    ShuffleV2Stage,
+    ShuffleV2Stem,
+)
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -198,6 +203,9 @@ __all__ = (
     "SCDown",
     "SEBlock",
     "Segment",
+    "ShuffleV2Block",
+    "ShuffleV2Stage",
+    "ShuffleV2Stem",
     "SpatialAttention",
     "TorchVision",
     "TransformerBlock",

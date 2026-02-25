@@ -71,6 +71,9 @@ from ultralytics.nn.modules import (
     SCDown,
     SEBlock,
     Segment,
+    ShuffleV2Block,
+    ShuffleV2Stage,
+    ShuffleV2Stem,
     TorchVision,
     WorldDetect,
     YOLOEDetect,
@@ -1572,6 +1575,9 @@ def parse_model(d, ch, verbose=True):
             RepVGGBlock,
             RepVGGStage,
             RepVGGStem,
+            ShuffleV2Block,
+            ShuffleV2Stage,
+            ShuffleV2Stem,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1593,6 +1599,7 @@ def parse_model(d, ch, verbose=True):
             A2C2f,
             MobileNetV3Stage,
             RepVGGStage,
+            ShuffleV2Stage,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
