@@ -62,7 +62,10 @@ from ultralytics.nn.modules import (
     RepC3,
     RepConv,
     RepNCSPELAN4,
+    RepVGGBlock,
     RepVGGDW,
+    RepVGGStage,
+    RepVGGStem,
     ResNetLayer,
     RTDETRDecoder,
     SCDown,
@@ -244,6 +247,9 @@ class BaseModel(torch.nn.Module):
                     m.fuse_convs()
                     m.forward = m.forward_fuse  # update forward
                 if isinstance(m, RepVGGDW):
+                    m.fuse()
+                    m.forward = m.forward_fuse
+                if isinstance(m, RepVGGBlock):
                     m.fuse()
                     m.forward = m.forward_fuse
                 if isinstance(m, v10Detect):
@@ -1563,6 +1569,9 @@ def parse_model(d, ch, verbose=True):
             MobileNetV3Stage,
             MobileNetV3Downsample,
             SEBlock,
+            RepVGGBlock,
+            RepVGGStage,
+            RepVGGStem,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1583,6 +1592,7 @@ def parse_model(d, ch, verbose=True):
             C2PSA,
             A2C2f,
             MobileNetV3Stage,
+            RepVGGStage,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args

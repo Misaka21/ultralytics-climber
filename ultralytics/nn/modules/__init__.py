@@ -71,6 +71,11 @@ from .mobilenet import (
     MobileNetV3Stem,
     SEBlock,
 )
+from .repvgg import (
+    RepVGGBlock,
+    RepVGGStage,
+    RepVGGStem,
+)
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -185,7 +190,10 @@ __all__ = (
     "RepC3",
     "RepConv",
     "RepNCSPELAN4",
+    "RepVGGBlock",
     "RepVGGDW",
+    "RepVGGStem",
+    "RepVGGStage",
     "ResNetLayer",
     "SCDown",
     "SEBlock",
