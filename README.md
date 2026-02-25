@@ -4,7 +4,7 @@ RoboMaster 视觉组的轻量化 YOLO 训练框架，针对装甲板检测和大
 
 ## 🚀 核心特性
 
-- **MobileNetV3 骨干网络** - 轻量高效，适合边缘设备部署
+- **多种轻量骨干网络** - MobileNetV3 / RepVGG / ShuffleNetV2 / EfficientFormer，按需切换
 - **自定义损失函数** - WingLoss + 分阶段训练，角点检测更精确
 - **旋转不变损失** - 解决大符 4 重对称性导致的混淆问题
 - **配置化训练** -  YAML 文件集中管理，一键切换任务
@@ -24,7 +24,10 @@ config/
 │   │   ├── armor-detect-mobilenet.yaml  # 12类装甲板检测
 │   │   └── car-detect-mobilenet.yaml    # 车辆检测
 │   └── rune/
-│       └── rune-pose-mobilenet.yaml     # 8点大符姿态估计
+│       ├── rune-pose-mobilenet.yaml        # 8点大符 MobileNetV3
+│       ├── rune-pose-repvgg.yaml           # 8点大符 RepVGG
+│       ├── rune-pose-shufflenet.yaml       # 8点大符 ShuffleNetV2
+│       └── rune-pose-efficientformer.yaml  # 8点大符 EfficientFormer
 └── hyperparams/       # 超参数配置
     ├── armor_pose.yaml
     ├── armor_detect.yaml
@@ -32,6 +35,9 @@ config/
 
 ultralytics/
 ├── nn/modules/mobilenet.py              # MobileNetV3 实现
+├── nn/modules/repvgg.py                 # RepVGG 实现（推理时多分支融合）
+├── nn/modules/shufflenet.py             # ShuffleNetV2 实现（通道 shuffle）
+├── nn/modules/efficientformer.py        # EfficientFormer 实现（轻量 attention）
 ├── utils/loss_armor.py                  # 装甲板优化损失函数 ⭐
 ├── utils/loss_rune.py                   # 大符旋转不变损失 ⭐
 └── models/yolo/pose/
@@ -214,18 +220,91 @@ loss = min(loss_0deg, loss_90deg, loss_180deg, loss_270deg)
 
 **效果**：网络不再被强制学习特定的旋转顺序，训练更稳定
 
-### 3. MobileNetV3 骨干网络
+### 3. 轻量骨干网络
 
-相比标准 YOLO 的 CSPDarknet：
+提供 4 种轻量 backbone，针对不同部署场景和精度需求：
 
-| 特性 | MobileNetV3 | CSPDarknet |
-|------|-------------|------------|
-| 参数量 | 少 60% | 基准 |
-| 计算量 | 少 70% | 基准 |
-| 速度 | 快 2-3x | 基准 |
-| 精度 | 略低 (~2%) | 基准 |
+| Backbone | 参数量 (nano) | 特点 | 适合场景 |
+|----------|-------------|------|---------|
+| **MobileNetV3** | ~200K | Depthwise separable conv，最轻量 | 极端算力受限 |
+| **RepVGG** | ~577K | 纯 3x3 标准卷积，推理融合为单路 | TensorRT 部署，需要强通道交互 |
+| **ShuffleNetV2** | ~695K | Channel shuffle 强制跨通道信息交换 | 均衡精度与速度 |
+| **EfficientFormer** | ~877K | 末层 pooling attention 捕捉全局几何 | 需要全局上下文（如大符） |
 
-**适合场景**：边缘设备（NUC、Jetson Nano）、高 FPS 需求
+> **MobileNetV3 的局限**：depthwise separable conv 通道间信息交互较弱，模型容易依赖颜色特征而非几何结构特征，换光照后效果可能下降。RepVGG / ShuffleNetV2 / EfficientFormer 提供更强的通道交互能力。
+
+#### 训练
+
+切换 backbone 只需修改 YAML 路径，其余训练流程完全一致：
+
+```python
+from ultralytics import YOLO
+import yaml
+
+# 选择 backbone（四选一）
+cfg = "config/models/rune/rune-pose-repvgg.yaml"         # RepVGG
+# cfg = "config/models/rune/rune-pose-shufflenet.yaml"   # ShuffleNetV2
+# cfg = "config/models/rune/rune-pose-efficientformer.yaml"  # EfficientFormer
+# cfg = "config/models/rune/rune-pose-mobilenet.yaml"    # MobileNetV3
+
+# 加载超参数
+with open("config/hyperparams/rune_pose.yaml") as f:
+    hyp = yaml.safe_load(f)
+
+# 训练（指定 scale: n/s/m）
+model = YOLO(cfg)
+model.train(**hyp, data="config/datasets/rune.yaml", scale="s")
+```
+
+命令行方式：
+
+```bash
+# RepVGG
+yolo pose train model=config/models/rune/rune-pose-repvgg.yaml \
+    data=config/datasets/rune.yaml cfg=config/hyperparams/rune_pose.yaml
+
+# ShuffleNetV2
+yolo pose train model=config/models/rune/rune-pose-shufflenet.yaml \
+    data=config/datasets/rune.yaml cfg=config/hyperparams/rune_pose.yaml
+
+# EfficientFormer
+yolo pose train model=config/models/rune/rune-pose-efficientformer.yaml \
+    data=config/datasets/rune.yaml cfg=config/hyperparams/rune_pose.yaml
+```
+
+#### 验证
+
+```python
+model = YOLO("runs/pose/train/weights/best.pt")
+metrics = model.val(data="config/datasets/rune.yaml")
+print(f"mAP50: {metrics.box.map50:.4f}")
+print(f"mAP50-95: {metrics.box.map:.4f}")
+```
+
+#### 导出
+
+```python
+model = YOLO("runs/pose/train/weights/best.pt")
+
+# 导出 ONNX
+model.export(format="onnx", imgsz=640, simplify=True)
+
+# 导出 TensorRT（RepVGG 推荐，多分支自动融合为单 3x3 conv）
+model.export(format="engine", imgsz=640, half=True)
+```
+
+#### 推理
+
+```python
+model = YOLO("runs/pose/train/weights/best.pt")
+results = model("path/to/image.jpg")
+
+for r in results:
+    # 关键点坐标 [N, 8, 3] (x, y, confidence)
+    keypoints = r.keypoints.data
+    # 检测框
+    boxes = r.boxes.xyxy
+```
 
 ## 📊 性能对比
 
@@ -381,6 +460,9 @@ class MyCustomLoss(ArmorPoseLoss):
 - [TUP-NN-Train-2 技术报告](https://github.com/TUP-vision) - 分阶段训练策略
 - [Wing Loss Paper](https://arxiv.org/abs/1711.06753) - 人脸关键点检测
 - [MobileNetV3 Paper](https://arxiv.org/abs/1905.02244) - 轻量级网络设计
+- [RepVGG Paper](https://arxiv.org/abs/2101.03697) - 多分支训练 + 单路推理
+- [ShuffleNetV2 Paper](https://arxiv.org/abs/1807.11164) - 通道 shuffle 高效网络
+- [EfficientFormer Paper](https://arxiv.org/abs/2206.01191) - 轻量 vision transformer
 
 ## 📄 License
 
