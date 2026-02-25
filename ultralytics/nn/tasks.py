@@ -46,6 +46,9 @@ from ultralytics.nn.modules import (
     Detect,
     DWConv,
     DWConvTranspose2d,
+    EfficientFormerBlock,
+    EfficientFormerStage,
+    EfficientFormerStem,
     Focus,
     GhostBottleneck,
     GhostConv,
@@ -1578,6 +1581,9 @@ def parse_model(d, ch, verbose=True):
             ShuffleV2Block,
             ShuffleV2Stage,
             ShuffleV2Stem,
+            EfficientFormerBlock,
+            EfficientFormerStage,
+            EfficientFormerStem,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1600,6 +1606,7 @@ def parse_model(d, ch, verbose=True):
             MobileNetV3Stage,
             RepVGGStage,
             ShuffleV2Stage,
+            EfficientFormerStage,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args

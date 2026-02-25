@@ -81,6 +81,12 @@ from .shufflenet import (
     ShuffleV2Stage,
     ShuffleV2Stem,
 )
+from .efficientformer import (
+    EfficientFormerBlock,
+    EfficientFormerStage,
+    EfficientFormerStem,
+    PoolingAttention,
+)
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -168,6 +174,9 @@ __all__ = (
     "DeformableTransformerDecoder",
     "DeformableTransformerDecoderLayer",
     "Detect",
+    "EfficientFormerBlock",
+    "EfficientFormerStage",
+    "EfficientFormerStem",
     "Focus",
     "GhostBottleneck",
     "GhostConv",
@@ -190,6 +199,7 @@ __all__ = (
     "MSDeformAttn",
     "MaxSigmoidAttnBlock",
     "Pose",
+    "PoolingAttention",
     "Proto",
     "RTDETRDecoder",
     "RepC3",
