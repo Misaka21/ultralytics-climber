@@ -242,7 +242,7 @@ class ArmorPoseLoss(v8PoseLoss):
             pred_bboxes_scaled = pred_bboxes * stride_tensor
             ious = bbox_iou(
                 pred_bboxes_scaled[fg_mask],
-                target_bboxes[fg_mask] * stride_tensor,
+                (target_bboxes * stride_tensor)[fg_mask],
                 xywh=False,
                 CIoU=False
             ).squeeze(-1)
