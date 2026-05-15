@@ -34,12 +34,14 @@ class BuffPoseTrainer(PoseTrainer):
         overrides["task"] = "pose"
         super().__init__(cfg, overrides, _callbacks)
 
-        # Swap criterion after model is fully built (incl. pretrained weights)
-        _model = _unwrap(self.model)
-        _model.init_criterion = lambda: _make_buff_loss(_model)
-
         self._l1_enabled = False
         self.add_callback("on_train_epoch_start", self._staged_training_callback)
+
+    def _setup_train(self):
+        """Build model (with pretrained weights), then swap in WingLoss criterion."""
+        super()._setup_train()  # self.model is now a PoseModel, not a str
+        _model = _unwrap(self.model)
+        _model.init_criterion = lambda: _make_buff_loss(_model)
 
     # ---- staged training -------------------------------------------------
     def _staged_training_callback(self, trainer):
