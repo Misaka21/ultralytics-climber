@@ -81,6 +81,9 @@ def _unwrap(model):
 
 
 def _make_buff_loss(model):
-    """Create ArmorPoseLoss (WingLoss + sigma=0.05 + IoU-weighted cls)."""
+    """ArmorPoseLoss with WingLoss, sigma tightening; IoU-weighted cls OFF (stability)."""
     from ultralytics.utils.loss_armor import ArmorPoseLoss
-    return ArmorPoseLoss(model)
+    loss = ArmorPoseLoss(model, use_iou_weighted_cls=False)
+    # 9 点 buff 用稍宽松的 sigma=0.07 避免早期震荡
+    loss.keypoint_loss.sigmas.fill_(0.07)
+    return loss
