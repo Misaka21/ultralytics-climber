@@ -3,6 +3,7 @@
 
 import subprocess
 from ultralytics import YOLO, settings
+from ultralytics.models.yolo.pose.train_buff import BuffPoseTrainer
 
 settings.update(tensorboard=True)
 
@@ -12,8 +13,18 @@ DATA_YAML = "config/datasets/buff.yaml"
 HYP_YAML = "config/hyperparams/buff_pose.yaml"
 
 
+class BuffYOLO(YOLO):
+    """Hook BuffPoseTrainer into the standard YOLO().train() flow."""
+
+    @property
+    def task_map(self):
+        mapping = super().task_map
+        mapping["pose"]["trainer"] = BuffPoseTrainer
+        return mapping
+
+
 def main():
-    model = YOLO(PRETRAINED)  # 加载 COCO 预训练权重，head 根据 data 自动适配 nc/kpt_shape
+    model = BuffYOLO(PRETRAINED)  # COCO 预训练权重 + WingLoss/IoU加权/sigma收紧
 
     model.train(
         data=DATA_YAML,
@@ -49,9 +60,9 @@ def main():
         close_mosaic=100,
         mixup=0.0,
         copy_paste=0.0,
-        hsv_h=0.015,
-        hsv_s=0.7,
-        hsv_v=0.4,
+        hsv_h=0.01,
+        hsv_s=0.15,
+        hsv_v=0.25,
         degrees=3.0,
         translate=0.05,
         scale=0.3,
