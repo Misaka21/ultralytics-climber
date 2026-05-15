@@ -49,7 +49,7 @@ def main():
 
         # 损失权重：pose 高权重保证角点回归精度
         cls=0.5,
-        pose=120.0,
+        pose=80.0,
 
         # 严格关闭翻转
         flipud=0.0,
@@ -57,7 +57,7 @@ def main():
 
         # 保守增强
         mosaic=0.2,
-        close_mosaic=100,
+        close_mosaic=50,
         mixup=0.0,
         copy_paste=0.0,
         hsv_h=0.01,
