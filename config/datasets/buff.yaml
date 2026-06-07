@@ -3,12 +3,11 @@
 # 注：无旋转不变性要求，不需要循环匹配
 
 # --------------------------
-# 数据集路径配置（train/val 同一目录，首次运行自动切分）
+# 数据集路径配置（autosplit 随机划分，seed=0 可复现）
 # --------------------------
 path: /media/nuc11/common/RM/RMCV/YOLO/data/RM2026_buff_new
-train: images
-val: images
-fraction: 0.9
+train: autosplit_train.txt
+val: autosplit_val.txt
 
 # --------------------------
 # 关键点定义
