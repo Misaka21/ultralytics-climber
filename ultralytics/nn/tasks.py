@@ -30,11 +30,13 @@ from ultralytics.nn.modules import (
     Bottleneck,
     BottleneckCSP,
     C2f,
+    C2f_CBAM,
     C2fAttn,
     C2fCIB,
     C2fPSA,
     C3Ghost,
     C3k2,
+    C3k2_CBAM,
     C3x,
     CBFuse,
     CBLinear,
@@ -1552,7 +1554,9 @@ def parse_model(d, ch, verbose=True):
             C1,
             C2,
             C2f,
+            C2f_CBAM,
             C3k2,
+    C3k2_CBAM,
             RepNCSPELAN4,
             ELAN1,
             ADown,
@@ -1593,6 +1597,7 @@ def parse_model(d, ch, verbose=True):
             C2,
             C2f,
             C3k2,
+    C3k2_CBAM,
             C2fAttn,
             C3,
             C3TR,
@@ -1634,7 +1639,7 @@ def parse_model(d, ch, verbose=True):
             if m in repeat_modules:
                 args.insert(2, n)  # number of repeats
                 n = 1
-            if m is C3k2:  # for M/L/X sizes
+            if m in (C3k2, C3k2_CBAM):  # for M/L/X sizes
                 legacy = False
                 if scale in "mlx":
                     args[3] = True

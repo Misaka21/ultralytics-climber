@@ -16,7 +16,7 @@ from ultralytics.utils.tal import dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import TORCH_1_11, fuse_conv_and_bn, smart_inference_mode
 
 from .block import DFL, SAVPE, BNContrastiveHead, ContrastiveHead, Proto, Residual, SwiGLUFFN
-from .conv import Conv, DWConv
+from .conv import CBAM, Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
@@ -350,12 +350,33 @@ class Pose(Detect):
         self.nk = kpt_shape[0] * kpt_shape[1]  # number of keypoints total
 
         c4 = max(ch[0] // 4, self.nk)
-        self.cv4 = nn.ModuleList(nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), nn.Conv2d(c4, self.nk, 1)) for x in ch)
+        self.cv4 = nn.ModuleList(
+            nn.Sequential(Conv(x + 2, c4, 3), Conv(c4, c4, 3), CBAM(c4, kernel_size=7), nn.Conv2d(c4, self.nk, 1))
+            for x in ch
+        )
+
+    @staticmethod
+    def _add_coords(x):
+        """Add normalized xy coordinate channels [-1, 1] to feature map for spatial awareness.
+
+        Args:
+            x (torch.Tensor): Feature map of shape (B, C, H, W).
+
+        Returns:
+            torch.Tensor: Feature map with 2 extra coordinate channels, shape (B, C+2, H, W).
+        """
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+        device, dtype = x.device, x.dtype
+        xx = torch.linspace(-1, 1, W, device=device, dtype=dtype).view(1, 1, 1, W).expand(B, 1, H, W)
+        yy = torch.linspace(-1, 1, H, device=device, dtype=dtype).view(1, 1, H, 1).expand(B, 1, H, W)
+        return torch.cat([x, xx, yy], dim=1)
 
     def forward(self, x: list[torch.Tensor]) -> torch.Tensor | tuple:
         """Perform forward pass through YOLO model and return predictions."""
         bs = x[0].shape[0]  # batch size
-        kpt = torch.cat([self.cv4[i](x[i]).view(bs, self.nk, -1) for i in range(self.nl)], -1)  # (bs, 17*3, h*w)
+        kpt = torch.cat(
+            [self.cv4[i](self._add_coords(x[i])).view(bs, self.nk, -1) for i in range(self.nl)], -1
+        )  # (bs, 17*3, h*w)
         x = Detect.forward(self, x)
         if self.training:
             return x, kpt

@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
-from .conv import Conv, DWConv, GhostConv, LightConv, RepConv, autopad
+from .conv import CBAM, Conv, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
 
 __all__ = (
@@ -312,6 +312,50 @@ class C2f(nn.Module):
         y = [y[0], y[1]]
         y.extend(m(y[-1]) for m in self.m)
         return self.cv2(torch.cat(y, 1))
+
+
+class C2f_CBAM(C2f):
+    """C2f module with CBAM (Channel + Spatial Attention) appended at the output.
+
+    This class extends C2f by adding a CBAM module after the standard C2f forward pass,
+    enabling both channel-wise and spatial-wise feature recalibration for improved
+    keypoint/corner detection precision.
+
+    Attributes:
+        cbam (CBAM): Convolutional Block Attention Module for feature refinement.
+
+    Examples:
+        >>> m = C2f_CBAM(256, 512, n=2)
+        >>> x = torch.randn(1, 256, 20, 20)
+        >>> y = m(x)
+    """
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5, kernel_size=7):
+        """Initialize C2f_CBAM with CBAM attention.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of Bottleneck blocks.
+            shortcut (bool): Whether to use shortcut connections in bottlenecks.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
+            kernel_size (int): CBAM spatial attention kernel size (3 or 7).
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.cbam = CBAM(c2, kernel_size)
+
+    def forward(self, x):
+        """Apply C2f forward pass followed by CBAM attention.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, C1, H, W).
+
+        Returns:
+            (torch.Tensor): CBAM-refined output tensor of shape (B, C2, H, W).
+        """
+        return self.cbam(super().forward(x))
+
 
 
 class C3(nn.Module):
@@ -1081,6 +1125,50 @@ class C3k2(C2f):
         self.m = nn.ModuleList(
             C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
         )
+
+
+class C3k2_CBAM(C3k2):
+    """C3k2 module with CBAM (Channel + Spatial Attention) appended at the output.
+
+    This class extends C3k2 by adding a CBAM module after the forward pass,
+    enabling channel-wise and spatial-wise feature recalibration for improved
+    keypoint/corner detection precision in YOLO11-style necks.
+
+    Attributes:
+        cbam (CBAM): Convolutional Block Attention Module for feature refinement.
+
+    Examples:
+        >>> m = C3k2_CBAM(256, 512, n=2)
+        >>> x = torch.randn(1, 256, 20, 20)
+        >>> y = m(x)
+    """
+
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True, kernel_size=7):
+        """Initialize C3k2_CBAM with CBAM attention.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of blocks.
+            c3k (bool): Whether to use C3k blocks.
+            e (float): Expansion ratio.
+            g (int): Groups for convolutions.
+            shortcut (bool): Whether to use shortcut connections.
+            kernel_size (int): CBAM spatial attention kernel size (3 or 7).
+        """
+        super().__init__(c1, c2, n, c3k, e, g, shortcut)
+        self.cbam = CBAM(c2, kernel_size)
+
+    def forward(self, x):
+        """Apply C3k2 forward pass followed by CBAM attention.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, C1, H, W).
+
+        Returns:
+            (torch.Tensor): CBAM-refined output tensor of shape (B, C2, H, W).
+        """
+        return self.cbam(super().forward(x))
 
 
 class C3k(C3):

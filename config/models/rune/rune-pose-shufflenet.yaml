@@ -33,18 +33,18 @@ backbone:
 head:
   - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
   - [[-1, 2], 1, Concat, [1]]               # cat backbone P4
-  - [-1, 2, C2f, [232]]                     # 7
+  - [-1, 2, C2f_CBAM, [232]]                     # 7
 
   - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
   - [[-1, 1], 1, Concat, [1]]               # cat backbone P3
-  - [-1, 2, C2f, [116]]                     # 10 (P3/8-small)
+  - [-1, 2, C2f_CBAM, [116]]                     # 10 (P3/8-small)
 
   - [-1, 1, Conv, [116, 3, 2]]
   - [[-1, 7], 1, Concat, [1]]               # cat head P4
-  - [-1, 2, C2f, [232]]                     # 13 (P4/16-medium)
+  - [-1, 2, C2f_CBAM, [232]]                     # 13 (P4/16-medium)
 
   - [-1, 1, Conv, [232, 3, 2]]
   - [[-1, 4], 1, Concat, [1]]               # cat head P5
-  - [-1, 2, C2f, [464]]                     # 16 (P5/32-large)
+  - [-1, 2, C2f_CBAM, [464]]                     # 16 (P5/32-large)
 
   - [[10, 13, 16], 1, Pose, [nc, kpt_shape]]  # Pose(P3, P4, P5)
