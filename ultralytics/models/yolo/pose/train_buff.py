@@ -44,21 +44,35 @@ class BuffPoseTrainer(PoseTrainer):
         _model.init_criterion = lambda: _make_buff_loss(_model)
 
     # ---- staged training -------------------------------------------------
+    @staticmethod
+    def _sync_l1_mode(model, enabled: bool) -> bool:
+        """Sync staged L1 mode flag to model and criterion (if already initialized)."""
+        unwrapped = _unwrap(model)
+        setattr(unwrapped, "pose_use_l1_finetuning", bool(enabled))
+        criterion = getattr(unwrapped, "criterion", None)
+        if criterion is not None:
+            if enabled and hasattr(criterion, "enable_l1_finetuning"):
+                criterion.enable_l1_finetuning()
+            elif (not enabled) and hasattr(criterion, "disable_l1_finetuning"):
+                criterion.disable_l1_finetuning()
+        return True
+
     def _staged_training_callback(self, trainer):
         if self._l1_enabled:
             return
         staged_epoch = int(self.epochs * 0.4)
         if self.epoch >= staged_epoch:
             try:
-                c = _unwrap(trainer.model).criterion
-                if hasattr(c, "enable_l1_finetuning"):
-                    c.enable_l1_finetuning()
-                    self._l1_enabled = True
-                    LOGGER.info(
-                        f"Staged training: WingLoss → L1 at epoch {self.epoch}/{self.epochs}"
-                    )
-            except Exception:
-                pass  # silently skip if criterion hasn't been built yet
+                self._sync_l1_mode(trainer.model, enabled=True)
+                ema_model = getattr(getattr(trainer, "ema", None), "ema", None)
+                if ema_model is not None:
+                    self._sync_l1_mode(ema_model, enabled=True)
+                self._l1_enabled = True
+                LOGGER.info(
+                    f"Buff staged training: WingLoss → L1 at epoch {self.epoch}, EMA synced"
+                )
+            except Exception as e:
+                LOGGER.warning(f"Could not enable buff L1 fine-tuning: {e}")
 
     # ---- validation ------------------------------------------------------
     def get_validator(self):

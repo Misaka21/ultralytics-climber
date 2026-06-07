@@ -6,7 +6,7 @@ RoboMaster 视觉组的轻量化 YOLO 训练框架，针对装甲板检测和大
 
 - **多种轻量骨干网络** - MobileNetV3 / RepVGG / ShuffleNetV2 / EfficientFormer，按需切换
 - **自定义损失函数** - WingLoss + 分阶段训练，角点检测更精确
-- **旋转不变损失** - 解决大符 4 重对称性导致的混淆问题
+- **Coordinate Attention + CoordConv** - 方向感知注意力引导多尺度融合，坐标通道增强空间定位
 - **配置化训练** -  YAML 文件集中管理，一键切换任务
 
 ## 📁 项目结构
@@ -16,36 +16,37 @@ config/
 ├── datasets/          # 数据集配置
 │   ├── armor_plate.yaml
 │   ├── armor_dataset_v4.yaml
-│   ├── rune.yaml
+│   ├── buff.yaml
 │   └── car_dataset_sliced.yaml
 ├── models/            # 模型架构配置
 │   ├── armor/
 │   │   ├── armor-pose-mobilenet.yaml    # 4点装甲板姿态估计
 │   │   ├── armor-detect-mobilenet.yaml  # 12类装甲板检测
 │   │   └── car-detect-mobilenet.yaml    # 车辆检测
-│   └── rune/
-│       ├── rune-pose-mobilenet.yaml        # 8点大符 MobileNetV3
-│       ├── rune-pose-repvgg.yaml           # 8点大符 RepVGG
-│       ├── rune-pose-shufflenet.yaml       # 8点大符 ShuffleNetV2
-│       └── rune-pose-efficientformer.yaml  # 8点大符 EfficientFormer
+│   └── buff/
+│       ├── buff-pose-yolo11.yaml           # 9点 buff YOLO11
+│       ├── buff-pose-repvgg.yaml           # 9点 buff RepVGG
+│       ├── buff-pose-shufflenet.yaml       # 9点 buff ShuffleNetV2
+│       ├── buff-pose-mobilenet.yaml        # 9点 buff MobileNetV3
+│       └── buff-pose-efficientformer.yaml  # 9点 buff EfficientFormer
 └── hyperparams/       # 超参数配置
     ├── armor_pose.yaml
     ├── armor_detect.yaml
-    └── rune_pose.yaml
+    └── buff_pose.yaml
 
 ultralytics/
 ├── nn/modules/mobilenet.py              # MobileNetV3 实现
 ├── nn/modules/repvgg.py                 # RepVGG 实现（推理时多分支融合）
 ├── nn/modules/shufflenet.py             # ShuffleNetV2 实现（通道 shuffle）
 ├── nn/modules/efficientformer.py        # EfficientFormer 实现（轻量 attention）
-├── utils/loss_armor.py                  # 装甲板优化损失函数 ⭐
-├── utils/loss_rune.py                   # 大符旋转不变损失 ⭐
+├── utils/loss_armor.py                  # 装甲板/Buff 优化损失函数 ⭐
 └── models/yolo/pose/
     ├── train_armor.py                   # 装甲板专用 Trainer
-    └── train_rune.py                    # 大符专用 Trainer
+    └── train_buff.py                    # Buff 专用 Trainer
 
 train_armor.py          # 装甲板训练入口
-train_rune_pose.py      # 大符训练入口
+train_buff_pose.py      # Buff 训练入口
+train_buff_pose_lite.py # Buff 轻量训练入口 (RepVGG)
 ```
 
 ## 🎯 快速开始
@@ -61,9 +62,6 @@ pip install -e .
 ```bash
 # 训练装甲板姿态估计
 python config/train_example.py --task armor_pose
-
-# 训练大符姿态估计
-python config/train_example.py --task rune_pose
 
 # 使用自定义数据集
 python config/train_example.py --task armor_pose --data /path/to/your/data
@@ -101,9 +99,9 @@ yolo pose train model=config/models/armor/armor-pose-mobilenet.yaml \
 | **WingLoss** | ✅ 开启 | 自动使用，无需配置 |
 | **Sigma=0.05** | ✅ 开启 | 自动使用，比标准更严格 |
 | **IoU 加权软标签** | ✅ 开启 | 默认启用，可关闭 |
-| **分阶段训练** | ❌ 关闭 | 需要手动调用切换 |
+| **分阶段训练** | ✅ 开启 | 40% epoch 自动 WingLoss → L1 |
 | **PolyIoU** | ❌ 关闭 | 需要手动替换损失 |
-| **旋转不变** | ❌ 关闭 | 只有用 `RunePoseTrainer` 才启用 |
+| **EMA 同步** | ✅ 开启 | 分阶段训练时自动同步 EMA |
 
 ### 1. 装甲板损失函数 (`loss_armor.py`)
 
@@ -193,32 +191,16 @@ class ArmorPoseTrainerWithPolyIoU(ArmorPoseTrainer):
         self.bbox_loss = PolyIoULoss()
 ```
 
-### 2. 大符旋转不变损失 (`loss_rune.py`) ❌ 默认关闭
+### 2. Coordinate Attention + CoordConv ✅ 默认开启
 
-**使用条件：** 只有使用 `RunePoseTrainer` 时才启用，标准 `PoseTrainer` 不启用
+在 Pose Head 和 Neck 中集成了 Coordinate Attention（CVPR 2021）和 CoordConv：
 
-解决大符 **4 重旋转对称性** 导致的混淆问题：
+- **Pose Head**: 3 层 `cv4` 中嵌入 CoordinateAttention，cv4 输入拼接归一化 xy 坐标通道（CoordConv），提升角点空间定位精度
+- **Neck**: `C2f_CoordAtt` / `C3k2_CoordAtt` 替代普通 `C2f` / `C3k2`，方向感知注意力引导多尺度特征融合
 
-```
-大符有 8 个关键点，排列成 4 对，具有 4 重中心对称性。
-网络可能混淆旋转顺序：0° / 90° / 180° / 270°
-```
+**Coordinate Attention vs CBAM**: CA 沿 H/W 方向分别池化（保留位置信息），CBAM 用全局池化（丢弃位置信息），角点定位任务中 CA 精度显著优于 CBAM。
 
-#### 🔹 循环旋转匹配
-
-```python
-# 计算 4 种旋转的损失，取最小值
-rotations = [
-    [0,1,2,3,4,5,6,7],  # 0°
-    [2,3,4,5,6,7,0,1],  # 90°
-    [4,5,6,7,0,1,2,3],  # 180°
-    [6,7,0,1,2,3,4,5],  # 270°
-]
-
-loss = min(loss_0deg, loss_90deg, loss_180deg, loss_270deg)
-```
-
-**效果**：网络不再被强制学习特定的旋转顺序，训练更稳定
+均通过 YAML 或代码自动生效，无需额外配置。
 
 ### 3. 轻量骨干网络
 
@@ -242,41 +224,41 @@ from ultralytics import YOLO
 import yaml
 
 # 选择 backbone（四选一）
-cfg = "config/models/rune/rune-pose-repvgg.yaml"         # RepVGG
-# cfg = "config/models/rune/rune-pose-shufflenet.yaml"   # ShuffleNetV2
-# cfg = "config/models/rune/rune-pose-efficientformer.yaml"  # EfficientFormer
-# cfg = "config/models/rune/rune-pose-mobilenet.yaml"    # MobileNetV3
+cfg = "config/models/buff/buff-pose-repvgg.yaml"         # RepVGG
+# cfg = "config/models/buff/buff-pose-shufflenet.yaml"   # ShuffleNetV2
+# cfg = "config/models/buff/buff-pose-efficientformer.yaml"  # EfficientFormer
+# cfg = "config/models/buff/buff-pose-mobilenet.yaml"    # MobileNetV3
 
 # 加载超参数
-with open("config/hyperparams/rune_pose.yaml") as f:
+with open("config/hyperparams/buff_pose.yaml") as f:
     hyp = yaml.safe_load(f)
 
 # 训练（指定 scale: n/s/m）
 model = YOLO(cfg)
-model.train(**hyp, data="config/datasets/rune.yaml", scale="s")
+model.train(**hyp, data="config/datasets/buff.yaml", scale="s")
 ```
 
 命令行方式：
 
 ```bash
 # RepVGG
-yolo pose train model=config/models/rune/rune-pose-repvgg.yaml \
-    data=config/datasets/rune.yaml cfg=config/hyperparams/rune_pose.yaml
+yolo pose train model=config/models/buff/buff-pose-repvgg.yaml \
+    data=config/datasets/buff.yaml cfg=config/hyperparams/buff_pose.yaml
 
 # ShuffleNetV2
-yolo pose train model=config/models/rune/rune-pose-shufflenet.yaml \
-    data=config/datasets/rune.yaml cfg=config/hyperparams/rune_pose.yaml
+yolo pose train model=config/models/buff/buff-pose-shufflenet.yaml \
+    data=config/datasets/buff.yaml cfg=config/hyperparams/buff_pose.yaml
 
 # EfficientFormer
-yolo pose train model=config/models/rune/rune-pose-efficientformer.yaml \
-    data=config/datasets/rune.yaml cfg=config/hyperparams/rune_pose.yaml
+yolo pose train model=config/models/buff/buff-pose-efficientformer.yaml \
+    data=config/datasets/buff.yaml cfg=config/hyperparams/buff_pose.yaml
 ```
 
 #### 验证
 
 ```python
 model = YOLO("runs/pose/train/weights/best.pt")
-metrics = model.val(data="config/datasets/rune.yaml")
+metrics = model.val(data="config/datasets/buff.yaml")
 print(f"mAP50: {metrics.box.map50:.4f}")
 print(f"mAP50-95: {metrics.box.map:.4f}")
 ```
@@ -315,13 +297,6 @@ for r in results:
 | OKS@0.5 | 0.82 | 0.89 | +8.5% |
 | 角点误差 (px) | 3.2 | 1.8 | -44% |
 | 收敛 epoch | 150 | 80 | -47% |
-
-### 大符识别（8点旋转不变）
-
-| 指标 | 标准 YOLO Pose | 本框架优化后 | 提升 |
-|------|---------------|-------------|------|
-| 关键点准确率 | 62% | 94% | +52% |
-| 旋转混淆率 | 35% | 2% | -94% |
 
 ## 🛠️ 如何使用这些 Trick
 
@@ -365,21 +340,7 @@ if hasattr(self, 'epoch') and self.epoch > self.total_epochs * 0.4:
     self.enable_l1_finetuning()
 ```
 
-### 3. 使用旋转不变损失（大符）
-
-```python
-from ultralytics.models.yolo.pose.train_rune import RunePoseTrainer
-
-# 只需要用这个 Trainer，旋转不变自动生效
-trainer = RunePoseTrainer(overrides={
-    "model": "config/models/rune/rune-pose-mobilenet.yaml",
-    "data": "config/datasets/rune.yaml",
-    "epochs": 100,
-})
-trainer.train()
-```
-
-### 4. 调整 Sigma（约束严格程度）
+### 3. 调整 Sigma（约束严格程度）
 
 在 `config/hyperparams/armor_pose.yaml` 中：
 ```yaml
@@ -394,7 +355,7 @@ for epoch in range(epochs):
     trainer.criterion.keypoint_loss.sigmas.fill_(sigma)
 ```
 
-### 5. IoU 加权软标签开关
+### 4. IoU 加权软标签开关
 
 ```python
 from ultralytics.utils.loss_armor import ArmorPoseLoss
@@ -406,7 +367,7 @@ loss_fn = ArmorPoseLoss(model, use_iou_weighted_cls=False)
 loss_fn.use_iou_weighted_cls = True  # 默认开启
 ```
 
-### 6. 自定义损失权重
+### 5. 自定义损失权重
 
 ```python
 # 在训练脚本中动态调整
@@ -444,7 +405,7 @@ train: images
 
 ### 自定义损失函数
 
-继承 `ArmorPoseLoss` 或 `RunePoseLoss`：
+继承 `ArmorPoseLoss`：
 
 ```python
 from ultralytics.utils.loss_armor import ArmorPoseLoss

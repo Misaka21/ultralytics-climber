@@ -68,10 +68,11 @@ class ArmorKeypointLoss(nn.Module):
         """
         diff = torch.abs(pred - target)
         # For small errors, use log-based loss (stronger gradient)
+        # log1p is numerically more stable than log(1+x) for small x
         small_mask = diff < self.w
         loss = torch.where(
             small_mask,
-            self.w * torch.log(1 + diff / self.epsilon),
+            self.w * torch.log1p(diff / self.epsilon),
             diff - self.C.to(diff.device)
         )
         return loss
@@ -177,6 +178,11 @@ class ArmorPoseLoss(v8PoseLoss):
         """
         if hasattr(self.keypoint_loss, 'use_l1'):
             self.keypoint_loss.use_l1 = True
+
+    def disable_l1_finetuning(self):
+        """Disable L1 loss and revert to WingLoss."""
+        if hasattr(self.keypoint_loss, 'use_l1'):
+            self.keypoint_loss.use_l1 = False
 
     def disable_l1_finetuning(self):
         """Disable L1 loss and use WingLoss (default mode)."""

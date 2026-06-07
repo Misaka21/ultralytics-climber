@@ -7,8 +7,8 @@ from ultralytics.models.yolo.pose.train_buff import BuffPoseTrainer
 
 settings.update(tensorboard=True)
 
-# 从 COCO 预训练权重开始迁移学习，backbone+neck 已有通用特征
-PRETRAINED = "yolo11l-pose.pt"   # 首次运行自动下载；想换 x 改 yolo11x-pose.pt
+MODEL_YAML = "config/models/buff/buff-pose-yolo11.yaml"   # 用 YAML 构建（含 C3k2_CBAM）
+PRETRAINED = "yolo11l-pose.pt"   # COCO 预训练权重，匹配的层自动迁移
 DATA_YAML = "config/datasets/buff.yaml"
 HYP_YAML = "config/hyperparams/buff_pose.yaml"
 
@@ -24,7 +24,8 @@ class BuffYOLO(YOLO):
 
 
 def main():
-    model = BuffYOLO(PRETRAINED)  # COCO 预训练权重 + WingLoss/IoU加权/sigma收紧
+    model = BuffYOLO(MODEL_YAML)   # 从 YAML 构建，C3k2_CoordAtt + CoordAtt/CoordConv 全部生效
+    model.load(PRETRAINED)        # 加载 COCO 预训练权重（新增层随机初始化）
 
     model.train(
         data=DATA_YAML,
