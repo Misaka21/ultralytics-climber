@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Armor pose training entrypoint (kpt_shape=[4,2], no rune rotation invariance)."""
+"""Armor pose training entrypoint (kpt_shape=[4,2])."""
 
 from ultralytics import YOLO, settings
 from ultralytics.models.yolo.pose.train_armor import ArmorPoseTrainer
