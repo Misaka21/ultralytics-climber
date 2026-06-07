@@ -16,7 +16,7 @@ from ultralytics.utils.tal import dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import TORCH_1_11, fuse_conv_and_bn, smart_inference_mode
 
 from .block import DFL, SAVPE, BNContrastiveHead, ContrastiveHead, Proto, Residual, SwiGLUFFN
-from .conv import CBAM, Conv, DWConv
+from .conv import CoordinateAttention, Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
@@ -351,7 +351,7 @@ class Pose(Detect):
 
         c4 = max(ch[0] // 4, self.nk)
         self.cv4 = nn.ModuleList(
-            nn.Sequential(Conv(x + 2, c4, 3), Conv(c4, c4, 3), CBAM(c4, kernel_size=7), nn.Conv2d(c4, self.nk, 1))
+            nn.Sequential(Conv(x + 2, c4, 3), Conv(c4, c4, 3), CoordinateAttention(c4), nn.Conv2d(c4, self.nk, 1))
             for x in ch
         )
 

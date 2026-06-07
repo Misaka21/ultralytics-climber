@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from ultralytics.utils.torch_utils import fuse_conv_and_bn
 
-from .conv import CBAM, Conv, DWConv, GhostConv, LightConv, RepConv, autopad
+from .conv import CBAM, Conv, CoordinateAttention, DWConv, GhostConv, LightConv, RepConv, autopad
 from .transformer import TransformerBlock
 
 __all__ = (
@@ -1169,6 +1169,82 @@ class C3k2_CBAM(C3k2):
             (torch.Tensor): CBAM-refined output tensor of shape (B, C2, H, W).
         """
         return self.cbam(super().forward(x))
+
+
+class C2f_CoordAtt(C2f):
+    """C2f module with Coordinate Attention for keypoint-aware feature refinement.
+
+    Unlike C2f_CBAM (global pooling loses spatial info), Coordinate Attention
+    encodes directional position information via independent H/W 1D pooling,
+    giving each pixel awareness of its distance from edges — critical for
+    corner/keypoint localization accuracy.
+
+    Attributes:
+        coord_att (CoordinateAttention): Per-direction attention for keypoint precision.
+    """
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        """Initialize C2f_CoordAtt with Coordinate Attention.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of Bottleneck blocks.
+            shortcut (bool): Whether to use shortcut connections in bottlenecks.
+            g (int): Groups for convolutions.
+            e (float): Expansion ratio.
+        """
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.coord_att = CoordinateAttention(c2)
+
+    def forward(self, x):
+        """Apply C2f forward pass followed by Coordinate Attention.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, C1, H, W).
+
+        Returns:
+            torch.Tensor: CoordAtt-refined output of shape (B, C2, H, W).
+        """
+        return self.coord_att(super().forward(x))
+
+
+class C3k2_CoordAtt(C3k2):
+    """C3k2 module with Coordinate Attention for keypoint-aware feature refinement.
+
+    Like C2f_CoordAtt but for the YOLO11-style C3k2 neck block. Coordinate
+    Attention preserves directional spatial information that global-pooling
+    approaches (SE/CBAM) discard, directly improving corner localization.
+
+    Attributes:
+        coord_att (CoordinateAttention): Per-direction attention for keypoint precision.
+    """
+
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
+        """Initialize C3k2_CoordAtt with Coordinate Attention.
+
+        Args:
+            c1 (int): Input channels.
+            c2 (int): Output channels.
+            n (int): Number of blocks.
+            c3k (bool): Whether to use C3k blocks.
+            e (float): Expansion ratio.
+            g (int): Groups for convolutions.
+            shortcut (bool): Whether to use shortcut connections.
+        """
+        super().__init__(c1, c2, n, c3k, e, g, shortcut)
+        self.coord_att = CoordinateAttention(c2)
+
+    def forward(self, x):
+        """Apply C3k2 forward pass followed by Coordinate Attention.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, C1, H, W).
+
+        Returns:
+            torch.Tensor: CoordAtt-refined output of shape (B, C2, H, W).
+        """
+        return self.coord_att(super().forward(x))
 
 
 class C3k(C3):

@@ -24,6 +24,7 @@ __all__ = (
     "LightConv",
     "RepConv",
     "SpatialAttention",
+    "CoordinateAttention",
 )
 
 
@@ -611,6 +612,85 @@ class CBAM(nn.Module):
             (torch.Tensor): Attended output tensor.
         """
         return self.spatial_attention(self.channel_attention(x))
+
+
+class CoordinateAttention(nn.Module):
+    """Coordinate Attention for precise keypoint/corner localization.
+
+    Unlike CBAM/SE which use global pooling (discarding positional information),
+    Coordinate Attention decomposes channel attention into two 1D feature encoding
+    streams — one per spatial direction. This preserves precise positional information
+    that is critical for keypoint detection accuracy.
+
+    Architecture:
+        Input → X-Pool(H dim) → ┐
+              → Y-Pool(W dim) → ├→ Concat → 1×1 Conv → BN → NL
+                                 │
+              → Split → Conv(H) → Sigmoid (a_h) ─┐
+              → Split → Conv(W) → Sigmoid (a_w) ─┤
+                                                  │
+        Output = Input × a_h × a_w
+
+    Key insight: SE pool(H,W)→1 → loses position → bad for corners.
+    CA pool(H)→H, pool(W)→W → each pixel knows its distance from edges.
+
+    Attributes:
+        conv1 (nn.Conv2d): Shared 1×1 reduction convolution.
+        bn1 (nn.BatchNorm2d): Batch normalization after reduction.
+        conv_h (nn.Conv2d): 1×1 conv for vertical (row-wise) attention weights.
+        conv_w (nn.Conv2d): 1×1 conv for horizontal (col-wise) attention weights.
+
+    References:
+        https://arxiv.org/abs/2103.02907 (CVPR 2021)
+        https://github.com/houqb/CoordAttention
+
+    Examples:
+        >>> ca = CoordinateAttention(256, reduction=32)
+        >>> x = torch.randn(1, 256, 20, 20)
+        >>> y = ca(x)
+    """
+
+    def __init__(self, c1, c2=None, reduction=32):
+        """Initialize Coordinate Attention module.
+
+        Args:
+            c1 (int): Number of input channels.
+            c2 (int): Number of output channels (defaults to c1).
+            reduction (int): Reduction ratio for hidden dimension (c1 // reduction).
+        """
+        super().__init__()
+        c2 = c2 or c1
+        hidden = max(8, c1 // reduction)
+        self.conv1 = nn.Conv2d(c1, hidden, 1, 1, 0)
+        self.bn1 = nn.BatchNorm2d(hidden)
+        self.conv_h = nn.Conv2d(hidden, c2, 1, 1, 0)
+        self.conv_w = nn.Conv2d(hidden, c2, 1, 1, 0)
+
+    def forward(self, x):
+        """Forward pass with per-direction attention.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (B, C, H, W).
+
+        Returns:
+            torch.Tensor: Attention-refined output of shape (B, C, H, W).
+        """
+        _, _, h, w = x.shape
+        # Pool independently along H and W directions (preserving spatial info)
+        x_h = x.mean(dim=3, keepdim=True)  # (B, C, H, 1) — avg along W
+        x_w = x.mean(dim=2, keepdim=True)  # (B, C, 1, W) — avg along H
+
+        # Permute and concat: (B, C, 1, H) and (B, C, 1, W) → (B, C, 1, H+W)
+        x_cat = torch.cat([x_h.permute(0, 1, 3, 2), x_w], dim=3)
+
+        x_out = torch.nn.functional.relu(self.bn1(self.conv1(x_cat)))
+        x_h, x_w = torch.split(x_out, [h, w], dim=3)  # (B, hidden, 1, H) + (B, hidden, 1, W)
+        x_h = x_h.permute(0, 1, 3, 2)  # back to (B, hidden, H, 1)
+
+        a_h = torch.sigmoid(self.conv_h(x_h))  # (B, C, H, 1)
+        a_w = torch.sigmoid(self.conv_w(x_w))  # (B, C, 1, W)
+
+        return x * a_h * a_w
 
 
 class Concat(nn.Module):
