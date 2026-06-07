@@ -7,7 +7,7 @@ from ultralytics.models.yolo.pose.train_buff import BuffPoseTrainer
 
 settings.update(tensorboard=True)
 
-MODEL_YAML = "config/models/buff/buff-pose-yolo11.yaml"   # 用 YAML 构建（含 C3k2_CBAM）
+MODEL_YAML = "config/models/buff/buff-pose-yolo11.yaml"   # 用 YAML 构建（含 SpatialAttention in Pose head）
 PRETRAINED = "yolo11l-pose.pt"   # COCO 预训练权重，匹配的层自动迁移
 DATA_YAML = "config/datasets/buff.yaml"
 HYP_YAML = "config/hyperparams/buff_pose.yaml"

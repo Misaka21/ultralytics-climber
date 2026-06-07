@@ -16,7 +16,7 @@ from ultralytics.utils.tal import dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import TORCH_1_11, fuse_conv_and_bn, smart_inference_mode
 
 from .block import DFL, SAVPE, BNContrastiveHead, ContrastiveHead, Proto, Residual, SwiGLUFFN
-from .conv import CoordinateAttention, Conv, DWConv
+from .conv import Conv, DWConv, SpatialAttention
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
@@ -351,7 +351,7 @@ class Pose(Detect):
 
         c4 = max(ch[0] // 4, self.nk)
         self.cv4 = nn.ModuleList(
-            nn.Sequential(Conv(x + 2, c4, 3), Conv(c4, c4, 3), CoordinateAttention(c4), nn.Conv2d(c4, self.nk, 1))
+            nn.Sequential(Conv(x, c4, 3), Conv(c4, c4, 3), SpatialAttention(7), nn.Conv2d(c4, self.nk, 1))
             for x in ch
         )
 
@@ -375,7 +375,7 @@ class Pose(Detect):
         """Perform forward pass through YOLO model and return predictions."""
         bs = x[0].shape[0]  # batch size
         kpt = torch.cat(
-            [self.cv4[i](self._add_coords(x[i])).view(bs, self.nk, -1) for i in range(self.nl)], -1
+            [self.cv4[i](x[i]).view(bs, self.nk, -1) for i in range(self.nl)], -1
         )  # (bs, 17*3, h*w)
         x = Detect.forward(self, x)
         if self.training:
