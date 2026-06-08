@@ -180,14 +180,58 @@ class ArmorPoseLoss(v8PoseLoss):
             self.keypoint_loss.use_l1 = True
 
     def disable_l1_finetuning(self):
-        """Disable L1 loss and revert to WingLoss."""
-        if hasattr(self.keypoint_loss, 'use_l1'):
-            self.keypoint_loss.use_l1 = False
-
-    def disable_l1_finetuning(self):
         """Disable L1 loss and use WingLoss (default mode)."""
         if hasattr(self.keypoint_loss, 'use_l1'):
             self.keypoint_loss.use_l1 = False
+
+    @staticmethod
+    def _snap_to_p3(fg_mask, target_gt_idx, target_bboxes,
+                    anchor_points, stride_tensor, batch_size):
+        """Snap P4/P5 targets to nearest P3 anchor for fine-grained kpt supervision.
+
+        The original assigner may route large targets to P4 (stride 16) or P5
+        (stride 32).  Keypoint regression on those coarse feature maps is
+        inherently limited.  This helper builds a supplementary foreground mask
+        that re-assigns every P4/P5 target to its spatially closest P3 (stride 8)
+        anchor point, so the keypoint loss always gets a high-resolution gradient.
+
+        Bbox/cls losses are NOT affected — only the returned mask is used for the
+        auxiliary keypoint loss term.
+
+        Returns:
+            p3_fg (Tensor): [B, N_anchors] bool, P3 anchors to supervise.
+            p3_gt_idx (Tensor): [B, N_anchors] long, mapped GT indices (-1 = bg).
+        """
+        p3_fg = torch.zeros_like(fg_mask)
+        p3_gt_idx = torch.full_like(target_gt_idx, -1)
+        stride_vals = stride_tensor.squeeze(-1)  # [N]
+
+        highest_stride = stride_vals.max().item()
+        if highest_stride <= 8:
+            return p3_fg, p3_gt_idx  # nothing to snap
+
+        high = fg_mask & (stride_vals > 8)
+        if not high.any():
+            return p3_fg, p3_gt_idx
+
+        p3_mask = (stride_vals == 8)
+        p3_idx = torch.where(p3_mask)[0]
+        p3_anchors = anchor_points[p3_mask]  # [M, 2] in grid coords
+
+        for b in range(batch_size):
+            b_high = high[b]
+            if not b_high.any():
+                continue
+            hi_list = torch.where(b_high)[0]
+            cx = (target_bboxes[b, hi_list, 0] + target_bboxes[b, hi_list, 2]) * 0.5
+            cy = (target_bboxes[b, hi_list, 1] + target_bboxes[b, hi_list, 3]) * 0.5
+            for j, h_idx in enumerate(hi_list):
+                d2 = (p3_anchors[:, 0] - cx[j]).pow(2) + (p3_anchors[:, 1] - cy[j]).pow(2)
+                nearest = p3_idx[d2.argmin()]
+                p3_fg[b, nearest] = True
+                p3_gt_idx[b, nearest] = target_gt_idx[b, h_idx]
+
+        return p3_fg, p3_gt_idx
 
     def __call__(self, preds, batch):
         """Calculate pose loss with IoU-weighted soft labels (TUP-style).
@@ -276,6 +320,17 @@ class ArmorPoseLoss(v8PoseLoss):
             loss[1], loss[2] = self.calculate_keypoints_loss(
                 fg_mask, target_gt_idx, keypoints, batch_idx, stride_tensor, target_bboxes, pred_kpts
             )
+
+            # P3 aux: snap P4/P5 targets to nearest stride-8 anchor for fine-grained kpt supervision
+            p3_fg, p3_gt_idx = self._snap_to_p3(
+                fg_mask, target_gt_idx, target_bboxes, anchor_points, stride_tensor, batch_size
+            )
+            if p3_fg.any():
+                p3_loss1, p3_loss2 = self.calculate_keypoints_loss(
+                    p3_fg, p3_gt_idx, keypoints, batch_idx, stride_tensor, target_bboxes, pred_kpts
+                )
+                loss[1] = 0.6 * loss[1] + 0.4 * p3_loss1
+                loss[2] = 0.6 * loss[2] + 0.4 * p3_loss2
 
         loss[0] *= self.hyp.box  # box gain
         loss[1] *= self.hyp.pose  # pose gain
