@@ -203,7 +203,7 @@ class ArmorPoseLoss(v8PoseLoss):
             p3_gt_idx (Tensor): [B, N_anchors] long, mapped GT indices (-1 = bg).
         """
         p3_fg = torch.zeros_like(fg_mask)
-        p3_gt_idx = torch.full_like(target_gt_idx, -1)
+        p3_gt_idx = torch.zeros_like(target_gt_idx)  # 0 is safe for gather (mask filters unused)
         stride_vals = stride_tensor.squeeze(-1)  # [N]
 
         highest_stride = stride_vals.max().item()
