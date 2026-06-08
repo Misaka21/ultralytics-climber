@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """大能量机关（Buff）Pose 训练脚本 — 高精度模型，无翻转，角点优先."""
 
-import subprocess
+import os
 from ultralytics import YOLO, settings
 from ultralytics.models.yolo.pose.train_buff import BuffPoseTrainer
 
 settings.update(tensorboard=True)
 
-MODEL_YAML = "config/models/buff/buff-pose-yolo11.yaml"   # 用 YAML 构建（含 SpatialAttention in Pose head）
+MODEL_YAML = "config/models/buff/buff-pose-yolo11l.yaml"   # 用 YAML 构建（含 SpatialAttention in Pose head）
 PRETRAINED = "yolo11l-pose.pt"   # COCO 预训练权重，匹配的层自动迁移
 DATA_YAML = "config/datasets/buff.yaml"
 HYP_YAML = "config/hyperparams/buff_pose.yaml"
@@ -77,4 +77,4 @@ if __name__ == "__main__":
     main()
 
     # 2 分钟后关机
-    subprocess.run(["shutdown", "-h", "+2"], check=False)
+    os.system("/usr/bin/shutdown")
